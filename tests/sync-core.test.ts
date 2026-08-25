@@ -101,4 +101,32 @@ describe('SyncEngine (3-Way Merge Core)', () => {
 
         await expect(engine.executeSync()).rejects.toThrow("Remote race detected");
     });
+
+    test('isIgnoredPath correctly blocks node_modules, hidden files, and custom excludes', () => {
+        const { isIgnoredPath } = require('../src/sync-core');
+        
+        // Node modules
+        expect(isIgnoredPath('node_modules/package/index.js')).toBe(true);
+        expect(isIgnoredPath('subfolder/node_modules/package.json')).toBe(true);
+        
+        // Hidden files & directories
+        expect(isIgnoredPath('.git/config')).toBe(true);
+        expect(isIgnoredPath('.obsidian/workspace.json')).toBe(true);
+        expect(isIgnoredPath('.DS_Store')).toBe(true);
+        expect(isIgnoredPath('folder/.DS_Store')).toBe(true);
+
+        // Internal sync state
+        expect(isIgnoredPath('plugins/sync-state.json')).toBe(true);
+
+        // Regular notes should NOT be ignored
+        expect(isIgnoredPath('Notes/Meeting.md')).toBe(false);
+        expect(isIgnoredPath('Daily/2026-08-26.md')).toBe(false);
+
+        // Custom excludes
+        const custom = ['templates', 'private/secret', 'archive'];
+        expect(isIgnoredPath('templates/daily.md', custom)).toBe(true);
+        expect(isIgnoredPath('private/secret/note.md', custom)).toBe(true);
+        expect(isIgnoredPath('archive/old.md', custom)).toBe(true);
+        expect(isIgnoredPath('public/note.md', custom)).toBe(false);
+    });
 });

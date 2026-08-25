@@ -1,5 +1,34 @@
 import { ILocalVault, IGitHubClient, LocalFile, RemoteFile, SyncState, GitTreeItem } from './interfaces';
-import { isIgnoredPath } from './local-vault';
+
+export function isIgnoredPath(path: string, customExcludes: string[] = []): boolean {
+    if (!path) return true;
+    // Hidden files & directories (.git, .obsidian, .trash, .DS_Store, etc.)
+    if (path.startsWith('.') || path.includes('/.')) return true;
+    
+    // Dependency directories
+    if (path === 'node_modules' || path.startsWith('node_modules/') || path.includes('/node_modules/')) return true;
+    
+    // Internal plugin state or OS junk
+    if (path.includes('sync-state.json')) return true;
+    if (path.endsWith('.DS_Store') || path.endsWith('Thumbs.db')) return true;
+
+    // Custom user excludes
+    for (const pattern of customExcludes) {
+        const clean = pattern.trim().replace(/^\/+|\/+$/g, ''); // strip leading/trailing slashes
+        if (!clean) continue;
+        if (
+            path === clean ||
+            path.startsWith(clean + '/') ||
+            path.includes('/' + clean + '/') ||
+            path.endsWith('/' + clean) ||
+            path.includes(clean)
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
 
 export type SyncActionType = 
     | 'UPLOAD' 
