@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/ufebri/ray-vault-sync/releases"><img src="https://img.shields.io/github/v/release/ufebri/ray-vault-sync?color=00d2ff&label=version" alt="GitHub release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="License" /></a>
-  <a href="https://www.buymeacoffee.com/raylabs"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=raylabs&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff" height="28" alt="Buy Me a Coffee" /></a>
+  <a href="https://www.buymeacoffee.com/raylabs"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=%E2%98%95&slug=raylabs&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff" height="28" alt="Buy Me a Coffee" /></a>
 </p>
 
 ---
@@ -73,7 +73,7 @@ If you find Ray Vault Sync helpful, consider supporting its development:
 
 <p align="center">
   <a href="https://www.buymeacoffee.com/raylabs">
-    <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=raylabs&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
+    <img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=%E2%98%95&slug=raylabs&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
   </a>
 </p>
 
