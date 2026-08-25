@@ -1,0 +1,7 @@
+node_modules/
+main.js
+dist/
+.DS_Store
+*.log
+coverage/
+.obsidian/
