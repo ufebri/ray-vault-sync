@@ -5,6 +5,63 @@ All notable changes to **Ray Vault Sync** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-08-26
+
+### Added
+- **Excluded Folders / Patterns Setting**: Configurable comma-separated list of folders or file patterns to ignore during sync (e.g. `templates, private, archive, node_modules`).
+- **Batched Tree Uploads (500 items/chunk)**: Inlines text file changes directly into `createTree` in chunks of 500 files, replacing thousands of sequential `createBlob` calls with atomic batch requests.
+- **In-Memory File Content Cache**: Caches file content and hash during initial scan, completely eliminating redundant disk I/O and duplicate SHA computations.
+- **GitHub Artifact Attestations**: Added cryptographic build provenance signing via `actions/attest-build-provenance@v2` in release workflow.
+
+### Changed
+- **Smart API Throttling**: Enforces 1-second delay between mutative requests according to GitHub secondary rate-limit guidelines without redundant delays.
+- **Ignore Filter (`isIgnoredPath`)**: Automatically excludes `node_modules/`, hidden files/folders (`.*`), `sync-state.json`, and OS junk (`.DS_Store`, `Thumbs.db`).
+- **Settings UI Compliance**: Removed prohibited heading texts ("General", "Settings", and plugin name) in accordance with Obsidian review guidelines.
+- **Popout Compatibility**: Uses `window.setTimeout` and `window.setInterval` for seamless popout window support.
+
+## [1.0.3] - 2026-08-26
+
+### Added
+- GitHub artifact attestations for release assets (cryptographic build provenance).
+- Excluded Folders / Patterns setting: Configure comma-separated folders or paths to exclude from synchronization.
+
+### Changed
+- Smart throttle: only sleeps the remaining time to reach 1s between mutative API requests, instead of a flat 1s delay every time.
+- Batched Tree Creation: Text file contents are now inlined directly into `createTree` in chunks of 500 files, eliminating thousands of individual `createBlob` calls.
+- In-Memory File Cache: Eliminates redundant disk reads and duplicate SHA calculations during sync execution.
+- Ignore Filter (`isIgnoredPath`): Automatically excludes `node_modules/`, hidden files/folders (`.*`), `sync-state.json`, and OS junk (`.DS_Store`, `Thumbs.db`).
+- Settings UI: Removed "General" heading to comply with Obsidian reviewer guidelines.
+
+## [1.0.2] - 2026-08-26
+
+### Fixed
+- Bump `minAppVersion` from `1.4.0` to `1.7.0` to match `fileManager.trashFile()` API requirement (since 1.6.6).
+- Settings heading no longer includes plugin name or the word "Settings" (Obsidian review rules).
+- Use `window.setTimeout()` instead of `setTimeout()` for popout window compatibility.
+- Fix unsafe `any` assignment in `loadSettings()` — cast to `Partial<RayVaultSyncSettings>`.
+- Replace `any[]` return type on `getSettingDefinitions()` with `never[]`.
+- Remove unused `_` catch variables.
+
+## [1.0.1] - 2026-08-26
+
+### Added
+- Concurrency lock (`isSyncing` mutex) prevents overlapping sync operations.
+- Smart cooldown backoff when GitHub rate limit is hit — reads `Retry-After` / `x-ratelimit-reset` headers.
+- Live progress indicator on Obsidian status bar during sync (e.g. `Processing 5/60: UPLOAD...`).
+- 1-second throttle between mutative GitHub API requests per GitHub's secondary rate limit best practices.
+
+### Changed
+- Replaced `fetch` with Obsidian's `requestUrl` API for mobile & CORS compatibility.
+- Replaced deprecated `escape()`/`unescape()` with `TextEncoder`/`TextDecoder` for Base64 encoding.
+- Replaced hardcoded `.obsidian` config path with `app.vault.configDir`.
+- Replaced `Vault.trash()` with `FileManager.trashFile()` for OS-level trash preference.
+- Settings UI uses `new Setting().setHeading()` instead of raw HTML.
+- All `catch (e: any)` replaced with `catch (e: unknown)` + `instanceof Error` checks.
+- All unawaited Promises prefixed with `void`.
+- `builtin-modules` dependency replaced with native `module.builtinModules`.
+- Diagnostics report writes to `Sync Diagnostics.md` instead of `console.log`.
+- README cleaned up: all emojis removed for a professional look.
+
 ## [1.0.0] - 2026-08-25
 
 ### Added

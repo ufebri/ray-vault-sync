@@ -22,7 +22,9 @@
 - **Gitless 3-Way Merge**: Synchronizes your vault notes via GitHub's REST API without requiring a local Git CLI, Xcode, or heavy WebAssembly modules.
 - **Mobile & Desktop First**: Works effortlessly on iOS, iPadOS, Android, macOS, Windows, and Linux.
 - **Zero Silent Data Loss**: Strict conflict safety policy. If the same file is edited concurrently on two devices, both versions are safely preserved (`.conflict-<timestamp>`).
-- **Atomic Batched Commits**: Group edits into clean, structured sync batches instead of spamming commits per keystroke.
+- **Batched Atomic Commits**: Groups changes into 500-item tree chunks and creates a single atomic Git commit per sync batch.
+- **Smart Rate-Limit Protection**: Enforces 1-second request throttling and automated cooldown timers to strictly comply with GitHub API secondary rate-limit guidelines.
+- **Custom Exclude Patterns**: Easily ignore unwanted folders or files (e.g. `node_modules`, `templates/`, `private/`) via comma-separated settings.
 - **Configurable Auto-Sync**: Background auto-sync interval with safety debounce.
 - **Diagnostics & Health Check**: Built-in diagnostics tool to verify repository connectivity, permissions, and detect pending diverged files.
 - **100% Free & Open Source**: Full control of your private notes backed by your own private GitHub repository.
@@ -43,7 +45,8 @@
 2. Open **Settings > Ray Vault Sync**.
 3. Enter your **GitHub Personal Access Token**.
 4. Enter your **GitHub Repository** (`owner/repo`).
-5. (Optional) Enable **Auto-Sync** and set your preferred interval in minutes.
+5. (Optional) Configure **Excluded Folders / Patterns** (default: `node_modules, .git, ray-vault-sync`).
+6. (Optional) Enable **Auto-Sync** and set your preferred interval in minutes.
 
 ### Step 3: Start Syncing!
 - Click the **Sync** icon in Obsidian's left ribbon, or press `Cmd+P` / `Ctrl+P` and select `Ray Vault Sync: Sync Now`.

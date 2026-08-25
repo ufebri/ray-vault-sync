@@ -1,7 +1,39 @@
 import { App, TFile } from 'obsidian';
 import { ILocalVault, LocalFile, SyncState } from './interfaces';
 
+export function isIgnoredPath(path: string, customExcludes: string[] = []): boolean {
+    if (!path) return true;
+    // Hidden files & directories (.git, .obsidian, .trash, .DS_Store, etc.)
+    if (path.startsWith('.') || path.includes('/.')) return true;
+    
+    // Dependency directories
+    if (path === 'node_modules' || path.startsWith('node_modules/') || path.includes('/node_modules/')) return true;
+    
+    // Internal plugin state or OS junk
+    if (path.includes('sync-state.json')) return true;
+    if (path.endsWith('.DS_Store') || path.endsWith('Thumbs.db')) return true;
+
+    // Custom user excludes
+    for (const pattern of customExcludes) {
+        const clean = pattern.trim().replace(/^\/+|\/+$/g, ''); // strip leading/trailing slashes
+        if (!clean) continue;
+        if (
+            path === clean ||
+            path.startsWith(clean + '/') ||
+            path.includes('/' + clean + '/') ||
+            path.endsWith('/' + clean) ||
+            path.includes(clean)
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 export class LocalVault implements ILocalVault {
+    private customExcludes: string[] = [];
+
     private get syncStatePath() {
         return `${this.app.vault.configDir}/plugins/ray-vault-sync/sync-state.json`;
     }
@@ -9,7 +41,20 @@ export class LocalVault implements ILocalVault {
         return `${this.app.vault.configDir}/plugins/raylabs-vault-sync/sync-state.json`;
     }
 
-    constructor(private app: App) {}
+    constructor(private app: App, customExcludes?: string | string[]) {
+        if (typeof customExcludes === 'string') {
+            this.customExcludes = customExcludes
+                .split(',')
+                .map(p => p.trim())
+                .filter(p => p.length > 0);
+        } else if (Array.isArray(customExcludes)) {
+            this.customExcludes = customExcludes;
+        }
+    }
+
+    public getCustomExcludes(): string[] {
+        return this.customExcludes;
+    }
 
     private async sha1(buffer: ArrayBuffer): Promise<string> {
         const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
@@ -32,16 +77,18 @@ export class LocalVault implements ILocalVault {
         const localFiles: LocalFile[] = [];
 
         for (const file of allFiles) {
-            if (file.path.startsWith('.git/') || file.path.includes('sync-state.json')) continue;
+            if (isIgnoredPath(file.path, this.customExcludes)) continue;
             
-            const content = await this.app.vault.readBinary(file);
-            const hash = await this.getGithubBlobSha(content);
+            const buffer = await this.app.vault.readBinary(file);
+            const hash = await this.getGithubBlobSha(buffer);
             const isBinary = !['md', 'json', 'txt', 'csv', 'yaml', 'yml'].includes(file.extension.toLowerCase());
 
             localFiles.push({
                 path: file.path,
                 hash,
-                isBinary
+                isBinary,
+                content: isBinary ? undefined : new TextDecoder().decode(buffer),
+                binaryData: isBinary ? new Uint8Array(buffer) : undefined,
             });
         }
         return localFiles;

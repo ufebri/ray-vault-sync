@@ -122,7 +122,7 @@ export default class RayVaultSyncPlugin extends Plugin {
             if (!isAuto) new Notice('Ray Vault Sync: Syncing with GitHub...');
             this.statusBarItemEl.setText('Ray Sync: Syncing...');
 
-            const localVault = new LocalVault(this.app);
+            const localVault = new LocalVault(this.app, this.settings.excludedPaths);
             const githubClient = new GitHubClient(this.settings.githubToken, this.settings.repository);
             const engine = new SyncEngine(localVault, githubClient, this.settings.branch || 'main');
 

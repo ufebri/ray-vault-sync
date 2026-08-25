@@ -7,6 +7,7 @@ export interface RayVaultSyncSettings {
     branch: string;
     autoSyncEnabled: boolean;
     autoSyncInterval: number;
+    excludedPaths: string;
 }
 
 export const DEFAULT_SETTINGS: RayVaultSyncSettings = {
@@ -14,7 +15,8 @@ export const DEFAULT_SETTINGS: RayVaultSyncSettings = {
     repository: 'ufebri/raylabs-vault',
     branch: 'main',
     autoSyncEnabled: false,
-    autoSyncInterval: 5
+    autoSyncInterval: 5,
+    excludedPaths: 'node_modules, .git, ray-vault-sync'
 };
 
 export class RayVaultSyncSettingTab extends PluginSettingTab {
@@ -32,11 +34,6 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-
-        new Setting(containerEl)
-            .setName('General')
-            .setDesc('Easy, free, cross-device GitHub synchronization for your Obsidian vault.')
-            .setHeading();
 
         new Setting(containerEl)
             .setName('GitHub Personal Access Token')
@@ -95,6 +92,17 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                         this.plugin.setupAutoSync();
                     }
+                }));
+
+        new Setting(containerEl)
+            .setName('Excluded Folders / Patterns')
+            .setDesc('Comma-separated list of folders or file patterns to ignore during sync (e.g. templates, private, archive, node_modules)')
+            .addTextArea(text => text
+                .setPlaceholder('node_modules, .git, ray-vault-sync')
+                .setValue(this.plugin.settings.excludedPaths || 'node_modules, .git, ray-vault-sync')
+                .onChange(async (value) => {
+                    this.plugin.settings.excludedPaths = value;
+                    await this.plugin.saveSettings();
                 }));
     }
 }

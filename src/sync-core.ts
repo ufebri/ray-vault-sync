@@ -1,4 +1,5 @@
 import { ILocalVault, IGitHubClient, LocalFile, RemoteFile, SyncState, GitTreeItem } from './interfaces';
+import { isIgnoredPath } from './local-vault';
 
 export type SyncActionType = 
     | 'UPLOAD' 
@@ -24,7 +25,12 @@ export class SyncEngine {
         private branch: string = 'main'
     ) {}
 
-    public async calculatePlan(): Promise<{ plan: FileSyncPlan[], remoteHead: string, baseState: SyncState }> {
+    public async calculatePlan(): Promise<{
+        plan: FileSyncPlan[],
+        remoteHead: string,
+        baseState: SyncState,
+        localMap: Map<string, LocalFile>
+    }> {
         const remoteHead = await this.remote.getHeadCommit(this.branch);
         const remoteTree = await this.remote.getTree(remoteHead);
         const localFiles = await this.local.getFiles();
@@ -35,7 +41,10 @@ export class SyncEngine {
         }
 
         const plan = this.reconcile(baseState.baseFiles, localFiles, remoteTree);
-        return { plan, remoteHead, baseState };
+        const localMap = new Map<string, LocalFile>();
+        for (const lf of localFiles) localMap.set(lf.path, lf);
+
+        return { plan, remoteHead, baseState, localMap };
     }
 
     private reconcile(
@@ -52,8 +61,10 @@ export class SyncEngine {
         const allPaths = new Set([...localMap.keys(), ...remoteMap.keys(), ...Object.keys(base)]);
         const plan: FileSyncPlan[] = [];
 
+        const customExcludes = this.local.getCustomExcludes ? this.local.getCustomExcludes() : [];
+
         for (const path of allPaths) {
-            if (path.startsWith('.') || path.includes('/.')) continue; // Ignore hidden files/folders globally
+            if (isIgnoredPath(path, customExcludes)) continue; // Ignore hidden files, node_modules, and custom user excludes
 
             const bHash = base[path];
             const lHash = localMap.get(path)?.hash;
@@ -114,8 +125,8 @@ export class SyncEngine {
 
     public async executeSync(onProgress?: (msg: string) => void): Promise<void> {
         // Step 1: Calculate plan
-        onProgress?.('Calculating diffs...');
-        const { plan, remoteHead, baseState } = await this.calculatePlan();
+        onProgress?.('Scanning diffs...');
+        const { plan, remoteHead, baseState, localMap } = await this.calculatePlan();
         
         const needsAction = plan.some(p => p.action !== 'NOOP');
         if (!needsAction && remoteHead === baseState.lastSyncedCommit) {
@@ -129,31 +140,29 @@ export class SyncEngine {
         let hasUploadsOrDeletes = false;
 
         const actionItems = plan.filter(p => p.action !== 'NOOP');
-        let currentItem = 0;
+        onProgress?.(`Processing ${actionItems.length} changes...`);
 
         for (const item of plan) {
-            if (item.action !== 'NOOP') {
-                currentItem++;
-                onProgress?.(`Processing ${currentItem}/${actionItems.length}: ${item.action}...`);
-            }
-
             if (item.action === 'NOOP') {
                 if (item.localHash) newBaseFiles[item.path] = item.localHash;
             } else if (item.action === 'DOWNLOAD') {
+                onProgress?.(`Downloading ${item.path}...`);
                 const ext = item.path.split('.').pop()?.toLowerCase() || '';
                 const isBinary = !['md', 'json', 'txt', 'csv', 'yaml', 'yml'].includes(ext);
                 const content = await this.remote.getBlob(item.remoteSha!, isBinary);
                 await this.local.writeFile(item.path, content, isBinary);
                 newBaseFiles[item.path] = item.remoteHash!;
             } else if (item.action === 'UPLOAD') {
-                const localFile = await this.local.readFile(item.path);
-                const sha = await this.remote.createBlob(localFile.content || localFile.binaryData!, localFile.isBinary);
-                treeChanges.push({
-                    path: item.path,
-                    mode: '100644',
-                    type: 'blob',
-                    sha: sha
-                });
+                const localFile = localMap.get(item.path) || await this.local.readFile(item.path);
+                if (localFile.isBinary) {
+                    onProgress?.(`Uploading binary ${item.path}...`);
+                    // Binary files must use createBlob (can't inline binary in tree API)
+                    const sha = await this.remote.createBlob(localFile.binaryData!, true);
+                    treeChanges.push({ path: item.path, mode: '100644', type: 'blob', sha });
+                } else {
+                    // Text files: inline content directly in createTree — no createBlob needed
+                    treeChanges.push({ path: item.path, mode: '100644', type: 'blob', content: localFile.content ?? '' });
+                }
                 newBaseFiles[item.path] = item.localHash!;
                 hasUploadsOrDeletes = true;
             } else if (item.action === 'DELETE_LOCAL') {
@@ -176,36 +185,33 @@ export class SyncEngine {
                     const remoteContent = await this.remote.getBlob(item.remoteSha, isBinary);
                     await this.local.writeFile(conflictPath, remoteContent, isBinary);
                     
-                    const localFile = await this.local.readFile(item.path);
-                    const sha = await this.remote.createBlob(localFile.content || localFile.binaryData!, localFile.isBinary);
-                    treeChanges.push({
-                        path: item.path,
-                        mode: '100644',
-                        type: 'blob',
-                        sha: sha
-                    });
+                    const localFile = localMap.get(item.path) || await this.local.readFile(item.path);
+                    if (localFile.isBinary) {
+                        const sha = await this.remote.createBlob(localFile.binaryData!, true);
+                        treeChanges.push({ path: item.path, mode: '100644', type: 'blob', sha });
+                    } else {
+                        treeChanges.push({ path: item.path, mode: '100644', type: 'blob', content: localFile.content ?? '' });
+                    }
                     
-                    const conflictSha = await this.remote.createBlob(remoteContent, isBinary);
-                    treeChanges.push({
-                        path: conflictPath,
-                        mode: '100644',
-                        type: 'blob',
-                        sha: conflictSha
-                    });
+                    if (isBinary) {
+                        const conflictSha = await this.remote.createBlob(remoteContent as Uint8Array, true);
+                        treeChanges.push({ path: conflictPath, mode: '100644', type: 'blob', sha: conflictSha });
+                    } else {
+                        treeChanges.push({ path: conflictPath, mode: '100644', type: 'blob', content: remoteContent as string });
+                    }
 
                     newBaseFiles[item.path] = item.localHash!;
                     newBaseFiles[conflictPath] = item.remoteHash;
                     hasUploadsOrDeletes = true;
                 } else if (item.localHash && !item.remoteHash) {
                     // Local edit while deleted remotely: re-upload local
-                    const localFile = await this.local.readFile(item.path);
-                    const sha = await this.remote.createBlob(localFile.content || localFile.binaryData!, localFile.isBinary);
-                    treeChanges.push({
-                        path: item.path,
-                        mode: '100644',
-                        type: 'blob',
-                        sha: sha
-                    });
+                    const localFile = localMap.get(item.path) || await this.local.readFile(item.path);
+                    if (localFile.isBinary) {
+                        const sha = await this.remote.createBlob(localFile.binaryData!, true);
+                        treeChanges.push({ path: item.path, mode: '100644', type: 'blob', sha });
+                    } else {
+                        treeChanges.push({ path: item.path, mode: '100644', type: 'blob', content: localFile.content ?? '' });
+                    }
                     newBaseFiles[item.path] = item.localHash;
                     hasUploadsOrDeletes = true;
                 }
@@ -216,17 +222,29 @@ export class SyncEngine {
         
         // Step 3: Remote Atomic Commit
         if (hasUploadsOrDeletes) {
-            onProgress?.('Committing changes to GitHub...');
             const latestRemoteHead = await this.remote.getHeadCommit(this.branch);
             if (latestRemoteHead !== remoteHead) {
                 throw new Error("Remote race detected: branch moved during sync. Please retry.");
             }
 
-            const newTreeSha = await this.remote.createTree(remoteHead, treeChanges);
+            // Chunk tree changes into batches of 500 to keep payload well within GitHub limits
+            const BATCH_SIZE = 500;
+            let currentTreeSha = remoteHead;
+            const totalBatches = Math.ceil(treeChanges.length / BATCH_SIZE);
+
+            for (let i = 0; i < treeChanges.length; i += BATCH_SIZE) {
+                const batch = treeChanges.slice(i, i + BATCH_SIZE);
+                const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+                onProgress?.(`Uploading batch ${batchNum}/${totalBatches} (${batch.length} files)...`);
+                currentTreeSha = await this.remote.createTree(currentTreeSha, batch);
+            }
+
+            onProgress?.('Creating commit...');
             const date = new Date().toISOString();
             const message = `Vault sync · Ray Vault Sync · ${date}`;
-            newCommit = await this.remote.createCommit(message, newTreeSha, [remoteHead]);
+            newCommit = await this.remote.createCommit(message, currentTreeSha, [remoteHead]);
             
+            onProgress?.('Updating remote branch...');
             await this.remote.updateRef(this.branch, newCommit);
         }
 

@@ -9,11 +9,15 @@ export class GitHubClient implements IGitHubClient {
         private token: string,
         private repo: string // e.g. "owner/repo"
     ) {}
+    private lastMutativeRequestTime = 0;
 
     private async request<T = unknown>(endpoint: string, method: string = 'GET', body?: unknown): Promise<T> {
-        // Anti-abuse: Sleep for 1 second between mutative requests according to GitHub's Best Practices
+        // Anti-abuse: Ensure at least 1 second between mutative requests (GitHub Best Practices)
         if (method !== 'GET') {
-            await new Promise(r => window.setTimeout(r, 1000));
+            const elapsed = Date.now() - this.lastMutativeRequestTime;
+            if (elapsed < 1000) {
+                await new Promise(r => window.setTimeout(r, 1000 - elapsed));
+            }
         }
 
         const req: RequestUrlParam = {
@@ -65,6 +69,9 @@ export class GitHubClient implements IGitHubClient {
                 }
             }
             throw new Error(errorMsg);
+        }
+        if (method !== 'GET') {
+            this.lastMutativeRequestTime = Date.now();
         }
 
         return response.json as T;

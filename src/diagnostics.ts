@@ -31,7 +31,7 @@ export async function runDiagnostics(
     // Check Local Vault
     push(`\n## Local Vault Status`);
     try {
-        const localVault = new LocalVault(app);
+        const localVault = new LocalVault(app, settings.excludedPaths);
         const state = await localVault.getSyncState();
         push(`- Sync State File: Readable (Schema v${state?.schemaVersion || 1})`);
         push(`- Last Synced Commit: \`${state?.lastSyncedCommit || 'None (Needs Initial Sync)'}\``);
@@ -75,7 +75,7 @@ export async function runDiagnostics(
     if (localOk && githubOk) {
         push(`\n## Synchronization Plan Preview`);
         try {
-            const engine = new SyncEngine(new LocalVault(app), new GitHubClient(settings.githubToken, settings.repository), settings.branch || 'main');
+            const engine = new SyncEngine(new LocalVault(app, settings.excludedPaths), new GitHubClient(settings.githubToken, settings.repository), settings.branch || 'main');
             const { plan } = await engine.calculatePlan();
             
             const uploads = plan.filter(p => p.action === 'UPLOAD').length;
@@ -102,7 +102,7 @@ export async function runDiagnostics(
     
     const reportPath = 'Sync Diagnostics.md';
     try {
-        const localVault = new LocalVault(app);
+        const localVault = new LocalVault(app, settings.excludedPaths);
         const encoder = new TextEncoder();
         await localVault.writeFile(reportPath, encoder.encode(report.join('\n')), false);
         

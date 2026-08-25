@@ -26,6 +26,7 @@ export interface ILocalVault {
     renameFile(oldPath: string, newPath: string): Promise<void>;
     getSyncState(): Promise<SyncState | null>;
     saveSyncState(state: SyncState): Promise<void>;
+    getCustomExcludes?(): string[];
 }
 
 export interface GitTreeItem {
