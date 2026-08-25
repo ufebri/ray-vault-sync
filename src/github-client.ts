@@ -13,7 +13,7 @@ export class GitHubClient implements IGitHubClient {
     private async request<T = unknown>(endpoint: string, method: string = 'GET', body?: unknown): Promise<T> {
         // Anti-abuse: Sleep for 1 second between mutative requests according to GitHub's Best Practices
         if (method !== 'GET') {
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => window.setTimeout(r, 1000));
         }
 
         const req: RequestUrlParam = {
@@ -59,7 +59,7 @@ export class GitHubClient implements IGitHubClient {
                         errorMsg = `GitHub Error: ${errorData.message}`;
                     }
                 }
-            } catch (_) {
+            } catch {
                 if (response.status === 403 || response.status === 429) {
                     errorMsg = `GitHub API Rate Limit exceeded. Will reset in ${waitSeconds}s.`;
                 }

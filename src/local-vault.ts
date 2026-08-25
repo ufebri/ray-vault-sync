@@ -164,7 +164,7 @@ export class LocalVault implements ILocalVault {
                 const state = JSON.parse(data) as SyncState;
                 await this.saveSyncState(state);
                 return state;
-            } catch (_) {
+            } catch {
                 /* legacy migration failed, ignore */
             }
         }

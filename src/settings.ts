@@ -25,7 +25,7 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
-    getSettingDefinitions(): any[] {
+    getSettingDefinitions(): never[] {
         return [];
     }
 
@@ -34,7 +34,7 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
         containerEl.empty();
 
         new Setting(containerEl)
-            .setName('Ray Vault Sync Settings')
+            .setName('General')
             .setDesc('Easy, free, cross-device GitHub synchronization for your Obsidian vault.')
             .setHeading();
 
