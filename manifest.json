@@ -1,7 +1,7 @@
 {
   "id": "ray-vault-sync",
   "name": "Ray Vault Sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.4.0",
   "description": "Easy, free, cross-device GitHub sync for your vault with 3-way merge and zero silent data loss. Works seamlessly across Desktop and Mobile.",
   "author": "Ray",

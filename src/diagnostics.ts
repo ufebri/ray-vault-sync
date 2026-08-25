@@ -46,8 +46,9 @@ export async function runDiagnostics(
         }
         
         localOk = true;
-    } catch (e: any) {
-        push(`- Local Vault Error: ${e.message}`);
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        push(`- Local Vault Error: ${msg}`);
     }
 
     // Check GitHub Access
@@ -65,8 +66,9 @@ export async function runDiagnostics(
         push(`- Remote Tree Listing: Accessible (${tree.length} files tracked)`);
         
         githubOk = true;
-    } catch (e: any) {
-        push(`- GitHub Connection Error: ${e.message}`);
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        push(`- GitHub Connection Error: ${msg}`);
     }
 
     // Reconciler Preview
@@ -89,27 +91,28 @@ export async function runDiagnostics(
             push(`- Pending Local Deletions: ${deletesL}`);
             push(`- Pending Remote Deletions: ${deletesR}`);
             push(`- Potential Conflicts: ${conflicts}`);
-        } catch (e: any) {
-            push(`- Reconciler Error: ${e.message}`);
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            push(`- Reconciler Error: ${msg}`);
         }
     }
 
     push('\n---');
     push('Ray Vault Sync — Easy. Free. Seamless.');
     
-    const reportPath = 'RayLabs Vault Sync/Diagnostics Report.md';
+    const reportPath = 'Sync Diagnostics.md';
     try {
         const localVault = new LocalVault(app);
         const encoder = new TextEncoder();
         await localVault.writeFile(reportPath, encoder.encode(report.join('\n')), false);
         
         const file = app.vault.getAbstractFileByPath(reportPath);
-        if (file) {
-            await app.workspace.getLeaf(true).openFile(file as any);
+        if (file && 'extension' in file) { // Ensures it's a TFile
+            await app.workspace.getLeaf(true).openFile(file as import('obsidian').TFile);
         }
         new Notice('Ray Vault Sync: Diagnostics complete! Report opened.');
-    } catch (e) {
-        console.log(report.join('\n'));
-        new Notice('Ray Vault Sync: Diagnostics complete! Report written to Developer Console.');
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        new Notice(`Ray Vault Sync: Diagnostics failed to write report. ${msg}`);
     }
 }

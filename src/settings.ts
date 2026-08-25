@@ -25,15 +25,18 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
+    getSettingDefinitions(): any[] {
+        return [];
+    }
+
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Ray Vault Sync Settings' });
-        const sub = containerEl.createEl('p', { text: 'Easy, free, cross-device GitHub synchronization for your Obsidian vault.' });
-        sub.style.color = 'var(--text-muted)';
-        sub.style.marginTop = '-10px';
-        sub.style.marginBottom = '20px';
+        new Setting(containerEl)
+            .setName('Ray Vault Sync Settings')
+            .setDesc('Easy, free, cross-device GitHub synchronization for your Obsidian vault.')
+            .setHeading();
 
         new Setting(containerEl)
             .setName('GitHub Personal Access Token')

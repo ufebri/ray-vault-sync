@@ -2,8 +2,12 @@ import { App, TFile } from 'obsidian';
 import { ILocalVault, LocalFile, SyncState } from './interfaces';
 
 export class LocalVault implements ILocalVault {
-    private syncStatePath = '.obsidian/plugins/ray-vault-sync/sync-state.json';
-    private legacySyncStatePath = '.obsidian/plugins/raylabs-vault-sync/sync-state.json';
+    private get syncStatePath() {
+        return `${this.app.vault.configDir}/plugins/ray-vault-sync/sync-state.json`;
+    }
+    private get legacySyncStatePath() {
+        return `${this.app.vault.configDir}/plugins/raylabs-vault-sync/sync-state.json`;
+    }
 
     constructor(private app: App) {}
 
@@ -55,7 +59,7 @@ export class LocalVault implements ILocalVault {
         } else {
             // Fallback to adapter if not yet indexed by Obsidian
             const data = await this.app.vault.adapter.readBinary(path);
-            buffer = data.buffer;
+            buffer = data;
             const ext = path.split('.').pop()?.toLowerCase() || '';
             isBinary = !['md', 'json', 'txt', 'csv', 'yaml', 'yml'].includes(ext);
         }
@@ -83,7 +87,7 @@ export class LocalVault implements ILocalVault {
             if (!exists) {
                 try {
                     await this.app.vault.createFolder(currentPath);
-                } catch (e: any) {
+                } catch (e: unknown) {
                     const errMsg = e instanceof Error ? e.message : String(e);
                     if (!errMsg.includes('Folder already exists')) {
                         throw e;
@@ -114,7 +118,7 @@ export class LocalVault implements ILocalVault {
                 } else {
                     await this.app.vault.create(path, content as string);
                 }
-            } catch (e: any) {
+            } catch (e: unknown) {
                 const errMsg = e instanceof Error ? e.message : String(e);
                 if (errMsg.includes('File already exists')) {
                     if (isBinary) {
@@ -132,9 +136,9 @@ export class LocalVault implements ILocalVault {
     public async deleteFile(path: string): Promise<void> {
         const file = this.app.vault.getAbstractFileByPath(path);
         if (file instanceof TFile) {
-            await this.app.vault.trash(file, false);
+            await this.app.fileManager.trashFile(file);
         } else if (await this.app.vault.adapter.exists(path)) {
-            await this.app.vault.adapter.trashLocal(path);
+            await this.app.vault.adapter.trashSystem(path); // prefer trashSystem instead of trashLocal for user OS preference if trashLocal triggers warning
         }
     }
 
@@ -160,7 +164,9 @@ export class LocalVault implements ILocalVault {
                 const state = JSON.parse(data) as SyncState;
                 await this.saveSyncState(state);
                 return state;
-            } catch (e) {}
+            } catch (_) {
+                /* legacy migration failed, ignore */
+            }
         }
 
         return null;

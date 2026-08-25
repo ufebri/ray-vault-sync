@@ -1,4 +1,4 @@
-import { ILocalVault, IGitHubClient, LocalFile, RemoteFile, SyncState } from './interfaces';
+import { ILocalVault, IGitHubClient, LocalFile, RemoteFile, SyncState, GitTreeItem } from './interfaces';
 
 export type SyncActionType = 
     | 'UPLOAD' 
@@ -112,21 +112,31 @@ export class SyncEngine {
         return plan;
     }
 
-    public async executeSync(): Promise<void> {
+    public async executeSync(onProgress?: (msg: string) => void): Promise<void> {
         // Step 1: Calculate plan
+        onProgress?.('Calculating diffs...');
         const { plan, remoteHead, baseState } = await this.calculatePlan();
         
         const needsAction = plan.some(p => p.action !== 'NOOP');
         if (!needsAction && remoteHead === baseState.lastSyncedCommit) {
+            onProgress?.('Already up to date');
             return; // Already up to date
         }
 
         // Step 2: Handle Conflicts & Downloads
         const newBaseFiles: Record<string, string> = {};
-        const treeChanges: any[] = [];
+        const treeChanges: GitTreeItem[] = [];
         let hasUploadsOrDeletes = false;
 
+        const actionItems = plan.filter(p => p.action !== 'NOOP');
+        let currentItem = 0;
+
         for (const item of plan) {
+            if (item.action !== 'NOOP') {
+                currentItem++;
+                onProgress?.(`Processing ${currentItem}/${actionItems.length}: ${item.action}...`);
+            }
+
             if (item.action === 'NOOP') {
                 if (item.localHash) newBaseFiles[item.path] = item.localHash;
             } else if (item.action === 'DOWNLOAD') {
@@ -206,6 +216,7 @@ export class SyncEngine {
         
         // Step 3: Remote Atomic Commit
         if (hasUploadsOrDeletes) {
+            onProgress?.('Committing changes to GitHub...');
             const latestRemoteHead = await this.remote.getHeadCommit(this.branch);
             if (latestRemoteHead !== remoteHead) {
                 throw new Error("Remote race detected: branch moved during sync. Please retry.");
@@ -220,6 +231,7 @@ export class SyncEngine {
         }
 
         // Step 4: Update Base State
+        onProgress?.('Saving local sync state...');
         await this.local.saveSyncState({
             schemaVersion: 1,
             lastSyncedCommit: newCommit,

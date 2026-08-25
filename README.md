@@ -17,19 +17,19 @@
 
 ---
 
-## ✨ Features
+## Features
 
-- 🔄 **Gitless 3-Way Merge**: Synchronizes your vault notes via GitHub's REST API without requiring a local Git CLI, Xcode, or heavy WebAssembly modules.
-- 📱 **Mobile & Desktop First**: Works effortlessly on iOS, iPadOS, Android, macOS, Windows, and Linux.
-- 🛡️ **Zero Silent Data Loss**: Strict conflict safety policy. If the same file is edited concurrently on two devices, both versions are safely preserved (`.conflict-<timestamp>`).
-- ⚡ **Atomic Batched Commits**: Group edits into clean, structured sync batches instead of spamming commits per keystroke.
-- ⏱️ **Configurable Auto-Sync**: Background auto-sync interval with safety debounce.
-- 🔍 **Diagnostics & Health Check**: Built-in diagnostics tool to verify repository connectivity, permissions, and detect pending diverged files.
-- 💸 **100% Free & Open Source**: Full control of your private notes backed by your own private GitHub repository.
+- **Gitless 3-Way Merge**: Synchronizes your vault notes via GitHub's REST API without requiring a local Git CLI, Xcode, or heavy WebAssembly modules.
+- **Mobile & Desktop First**: Works effortlessly on iOS, iPadOS, Android, macOS, Windows, and Linux.
+- **Zero Silent Data Loss**: Strict conflict safety policy. If the same file is edited concurrently on two devices, both versions are safely preserved (`.conflict-<timestamp>`).
+- **Atomic Batched Commits**: Group edits into clean, structured sync batches instead of spamming commits per keystroke.
+- **Configurable Auto-Sync**: Background auto-sync interval with safety debounce.
+- **Diagnostics & Health Check**: Built-in diagnostics tool to verify repository connectivity, permissions, and detect pending diverged files.
+- **100% Free & Open Source**: Full control of your private notes backed by your own private GitHub repository.
 
 ---
 
-## 🚀 Quick Start Guide
+## Quick Start Guide
 
 ### Step 1: Generate a GitHub Personal Access Token (PAT)
 1. Go to [GitHub Developer Settings > Personal Access Tokens (Fine-grained)](https://github.com/settings/tokens?type=beta).
@@ -50,7 +50,7 @@
 
 ---
 
-## ⚡ Handling Conflicts
+## Handling Conflicts
 
 If a file is edited independently on multiple devices without syncing in between, Ray Vault Sync will **never** guess a winner or overwrite your changes.
 
@@ -61,13 +61,13 @@ If a file is edited independently on multiple devices without syncing in between
 
 ---
 
-## 🤝 Contributing & Development
+## Contributing & Development
 
 We welcome contributions! Please check out [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup and architecture guidelines.
 
 ---
 
-## ☕ Support
+## Support
 
 If you find Ray Vault Sync helpful, consider supporting its development:
 
@@ -79,6 +79,6 @@ If you find Ray Vault Sync helpful, consider supporting its development:
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE) © 2026 Ray.

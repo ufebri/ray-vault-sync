@@ -28,11 +28,19 @@ export interface ILocalVault {
     saveSyncState(state: SyncState): Promise<void>;
 }
 
+export interface GitTreeItem {
+    path: string;
+    mode: string;
+    type: string;
+    sha?: string | null;
+    content?: string;
+}
+
 export interface IGitHubClient {
     getHeadCommit(branch: string): Promise<string>;
     getTree(commitSha: string): Promise<RemoteFile[]>;
     getBlob(sha: string, isBinary: boolean): Promise<string | Uint8Array>;
-    createTree(baseTreeSha: string, tree: any[]): Promise<string>;
+    createTree(baseTreeSha: string, tree: GitTreeItem[]): Promise<string>;
     createCommit(message: string, treeSha: string, parents: string[]): Promise<string>;
     updateRef(branch: string, commitSha: string, force?: boolean): Promise<void>;
     createBlob(content: string | Uint8Array, isBinary: boolean): Promise<string>;

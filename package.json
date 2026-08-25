@@ -1,6 +1,6 @@
 {
   "name": "ray-vault-sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Easy, free, cross-device GitHub sync for your vault with 3-way merge and zero silent data loss. Works seamlessly across Desktop and Mobile.",
   "main": "main.js",
   "scripts": {
@@ -25,7 +25,6 @@
   "devDependencies": {
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.0",
-    "builtin-modules": "^3.3.0",
     "esbuild": "^0.20.0",
     "jest": "^29.7.0",
     "obsidian": "^1.5.7-1",
