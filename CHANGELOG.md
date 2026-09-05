@@ -5,6 +5,18 @@ All notable changes to **Ray Vault Sync** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-05
+
+### Added
+- **Mobile Sidebar Sync Card**: Touch-friendly sync button with live spinning status indicator at the top of the Left Sidebar (File Explorer).
+- **Relative Last Sync Info**: Displays elapsed time since last sync (*"Baru saja"*, *"5m yang lalu"*, *"1j yang lalu"*) with auto-refresh every 30 seconds.
+- **Mobile Sidebar Setting**: Configurable toggle in plugin settings to enable or disable the sidebar card.
+- **Privacy & Vault Access Disclosure**: Added explicit vault enumeration documentation to README and source code for Obsidian reviewer transparency.
+
+### Fixed
+- **Unnecessary Type Assertion**: Removed redundant `as Uint8Array` assertion on `createBlob` in conflict resolution (`src/sync-core.ts`).
+- **Release Assets**: Included `styles.css` in GitHub Release workflow so custom styles are packaged with releases.
+
 ## [1.1.0] - 2026-08-26
 
 ### Added

@@ -4,6 +4,7 @@ import { SyncEngine } from './sync-core';
 import { LocalVault } from './local-vault';
 import { GitHubClient } from './github-client';
 import { runDiagnostics } from './diagnostics';
+import { MobileSyncWidget } from './mobile-widget';
 
 export default class RayVaultSyncPlugin extends Plugin {
     settings!: RayVaultSyncSettings;
@@ -12,6 +13,7 @@ export default class RayVaultSyncPlugin extends Plugin {
     private autoSyncIntervalId: number | null = null;
     private isSyncing = false;
     private rateLimitResetTime = 0;
+    private mobileWidget: MobileSyncWidget | null = null;
 
     async onload() {
         await this.loadSettings();
@@ -56,11 +58,32 @@ export default class RayVaultSyncPlugin extends Plugin {
                 void runDiagnostics(this.app, this.settings);
             }
         });
+
+        // Initialize Mobile Sidebar Widget
+        this.mobileWidget = new MobileSyncWidget(this);
+        this.app.workspace.onLayoutReady(() => {
+            this.mobileWidget?.mount();
+        });
+        this.registerEvent(this.app.workspace.on('layout-change', () => {
+            this.mobileWidget?.mount();
+        }));
     }
 
     onunload() {
         if (this.autoSyncIntervalId !== null) {
             window.clearInterval(this.autoSyncIntervalId);
+        }
+        if (this.mobileWidget) {
+            this.mobileWidget.destroy();
+            this.mobileWidget = null;
+        }
+    }
+
+    refreshMobileWidget() {
+        if (this.settings.enableMobileSidebarWidget) {
+            this.mobileWidget?.mount();
+        } else {
+            this.mobileWidget?.destroy();
         }
     }
 
@@ -118,6 +141,9 @@ export default class RayVaultSyncPlugin extends Plugin {
         }
 
         this.isSyncing = true;
+        this.settings.lastSyncStatus = 'syncing';
+        this.mobileWidget?.setSyncing();
+
         try {
             if (!isAuto) new Notice('Ray Vault Sync: Syncing with GitHub...');
             this.statusBarItemEl.setText('Ray Sync: Syncing...');
@@ -130,13 +156,27 @@ export default class RayVaultSyncPlugin extends Plugin {
                 this.statusBarItemEl.setText(`Ray Sync: ${progressMsg}`);
             });
 
-            const dateStr = new Date().toLocaleTimeString();
+            const now = Date.now();
+            this.settings.lastSyncTimestamp = now;
+            this.settings.lastSyncStatus = 'success';
+            this.settings.lastSyncMessage = undefined;
+            await this.saveSettings();
+
+            this.mobileWidget?.setSuccess(now);
+
+            const dateStr = new Date(now).toLocaleTimeString();
             if (!isAuto) new Notice(`Ray Vault Sync: Synced successfully at ${dateStr}`);
             this.statusBarItemEl.setText(`Ray Sync: Synced at ${dateStr}`);
         } catch (error: unknown) {
             console.error('Ray Vault Sync error:', error);
             const msg = error instanceof Error ? error.message : String(error);
             
+            this.settings.lastSyncStatus = 'error';
+            this.settings.lastSyncMessage = msg;
+            await this.saveSettings();
+
+            this.mobileWidget?.setError(msg);
+
             if (msg.includes('Rate Limit') || msg.includes('abuse limit')) {
                 // If it's a rate limit error without a specific reset time returned, default to 1 hour
                 const match = msg.match(/reset in (\d+)s/);

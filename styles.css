@@ -1,0 +1,120 @@
+/* Ray Vault Sync - Mobile Sidebar Widget Styles */
+
+.ray-vault-sync-mobile-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    margin: 6px 10px 10px 10px;
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m, 8px);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    user-select: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ray-vault-sync-btn-sync {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: var(--radius-s, 6px);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.ray-vault-sync-btn-sync:active {
+    transform: scale(0.98);
+}
+
+.ray-vault-sync-btn-sync:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.ray-vault-sync-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+}
+
+.ray-vault-sync-btn-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.ray-vault-sync-btn-icon.is-syncing svg {
+    animation: ray-vault-sync-spin 1s linear infinite;
+}
+
+@keyframes ray-vault-sync-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.ray-vault-sync-info-box {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.ray-vault-sync-status-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.ray-vault-sync-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ray-vault-sync-status-dot.idle {
+    background-color: var(--text-muted);
+}
+
+.ray-vault-sync-status-dot.syncing {
+    background-color: var(--interactive-accent, #3b82f6);
+    box-shadow: 0 0 6px var(--interactive-accent, #3b82f6);
+}
+
+.ray-vault-sync-status-dot.success {
+    background-color: var(--color-green, #10b981);
+}
+
+.ray-vault-sync-status-dot.error {
+    background-color: var(--color-red, #ef4444);
+}
+
+.ray-vault-sync-status-text {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.2px;
+}
+
+.ray-vault-sync-time-text {
+    font-size: 11px;
+    color: var(--text-faint, var(--text-muted));
+    white-space: nowrap;
+}

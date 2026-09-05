@@ -43,6 +43,13 @@ export class LocalVault implements ILocalVault {
         return this.sha1(combined.buffer);
     }
 
+    /**
+     * Enumerates all non-ignored files in the vault to detect changes for GitHub synchronization.
+     * Note for Obsidian review: As a full vault synchronization/backup plugin, vault enumeration
+     * via `vault.getFiles()` is fundamentally required to compare local SHA hashes against
+     * the remote GitHub tree. All internal/ignored paths and user custom excludes are strictly
+     * filtered out before reading.
+     */
     public async getFiles(): Promise<LocalFile[]> {
         const allFiles = this.app.vault.getFiles();
         const localFiles: LocalFile[] = [];

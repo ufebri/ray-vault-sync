@@ -8,6 +8,10 @@ export interface RayVaultSyncSettings {
     autoSyncEnabled: boolean;
     autoSyncInterval: number;
     excludedPaths: string;
+    enableMobileSidebarWidget: boolean;
+    lastSyncTimestamp: number | null;
+    lastSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
+    lastSyncMessage?: string;
 }
 
 export const DEFAULT_SETTINGS: RayVaultSyncSettings = {
@@ -16,7 +20,10 @@ export const DEFAULT_SETTINGS: RayVaultSyncSettings = {
     branch: 'main',
     autoSyncEnabled: false,
     autoSyncInterval: 5,
-    excludedPaths: 'node_modules, .git, ray-vault-sync'
+    excludedPaths: 'node_modules, .git, ray-vault-sync',
+    enableMobileSidebarWidget: true,
+    lastSyncTimestamp: null,
+    lastSyncStatus: 'idle'
 };
 
 export class RayVaultSyncSettingTab extends PluginSettingTab {
@@ -103,6 +110,17 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                     this.plugin.settings.excludedPaths = value;
                     await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Mobile Sidebar Sync Card')
+            .setDesc('Show quick sync button and last sync info at the top of the file explorer (recommended for mobile)')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableMobileSidebarWidget)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableMobileSidebarWidget = value;
+                    await this.plugin.saveSettings();
+                    this.plugin.refreshMobileWidget();
                 }));
     }
 }

@@ -223,10 +223,10 @@ export class SyncEngine {
                     }
                     
                     if (isBinary) {
-                        const conflictSha = await this.remote.createBlob(remoteContent as Uint8Array, true);
+                        const conflictSha = await this.remote.createBlob(remoteContent, true);
                         treeChanges.push({ path: conflictPath, mode: '100644', type: 'blob', sha: conflictSha });
                     } else {
-                        treeChanges.push({ path: conflictPath, mode: '100644', type: 'blob', content: remoteContent as string });
+                        treeChanges.push({ path: conflictPath, mode: '100644', type: 'blob', content: typeof remoteContent === 'string' ? remoteContent : '' });
                     }
 
                     newBaseFiles[item.path] = item.localHash!;
