@@ -29,7 +29,7 @@ export class MobileSyncWidget {
         const viewEl = fileExplorerLeaf.view.containerEl;
 
         // Check if already mounted
-        const existingCard = viewEl.querySelector('#ray-vault-sync-mobile-card') as HTMLElement | null;
+        const existingCard = viewEl.querySelector<HTMLElement>('#ray-vault-sync-mobile-card');
         if (existingCard) {
             this.containerEl = existingCard;
             this.updateState();
@@ -74,7 +74,7 @@ export class MobileSyncWidget {
 
         this.timeTextEl = infoBox.createDiv({
             cls: 'ray-vault-sync-time-text',
-            text: this.formatRelativeTime(this.plugin.settings.lastSyncTimestamp)
+            text: formatRelativeTime(this.plugin.settings.lastSyncTimestamp)
         });
 
         // Insert before .nav-files-container or at the beginning of the view
@@ -173,14 +173,14 @@ export class MobileSyncWidget {
 }
 
 export function formatRelativeTime(timestamp: number | null, now: number = Date.now()): string {
-    if (!timestamp) return 'Belum pernah sync';
+    if (!timestamp) return 'Never synced';
     const diff = Math.max(0, now - timestamp);
 
-    if (diff < 30_000) return 'Baru saja';
+    if (diff < 30_000) return 'Just now';
     const mins = Math.floor(diff / 60_000);
-    if (mins < 60) return `${mins}m yang lalu`;
+    if (mins < 60) return `${mins}m ago`;
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}j yang lalu`;
+    if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
-    return `${days}h yang lalu`;
+    return `${days}d ago`;
 }

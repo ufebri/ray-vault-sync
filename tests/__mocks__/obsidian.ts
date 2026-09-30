@@ -17,6 +17,7 @@ export class Plugin {
     addSettingTab() {}
     registerEvent() {}
     registerInterval() {}
+    registerDomEvent() {}
 }
 
 export class PluginSettingTab {
@@ -30,6 +31,10 @@ export class Setting {
     addText() { return this; }
     addToggle() { return this; }
     addTextArea() { return this; }
+    addButton(cb: (btn: { setButtonText: (t: string) => unknown; onClick: (fn: () => void) => unknown }) => void) {
+        cb({ setButtonText: () => ({}), onClick: () => ({}) });
+        return this;
+    }
 }
 
 export const Platform = {

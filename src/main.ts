@@ -1,10 +1,11 @@
-import { Plugin, Notice } from 'obsidian';
+import { Plugin, Notice, Platform } from 'obsidian';
 import { RayVaultSyncSettings, DEFAULT_SETTINGS, RayVaultSyncSettingTab } from './settings';
 import { SyncEngine } from './sync-core';
 import { LocalVault } from './local-vault';
 import { GitHubClient } from './github-client';
 import { runDiagnostics } from './diagnostics';
 import { MobileSyncWidget } from './mobile-widget';
+import { ErrorLogManager } from './error-log';
 
 export default class RayVaultSyncPlugin extends Plugin {
     settings!: RayVaultSyncSettings;
@@ -14,9 +15,24 @@ export default class RayVaultSyncPlugin extends Plugin {
     private isSyncing = false;
     private rateLimitResetTime = 0;
     private mobileWidget: MobileSyncWidget | null = null;
+    private errorLog!: ErrorLogManager;
 
     async onload() {
         await this.loadSettings();
+
+        this.errorLog = new ErrorLogManager(
+            this.app,
+            () => [this.settings.githubToken],
+            this.manifest?.version ?? 'dev',
+            Platform.isMobile ? 'mobile' : 'desktop'
+        );
+
+        this.registerDomEvent(window, 'error', (e: ErrorEvent) => {
+            void this.errorLog.log('window.onerror', e.error ?? e.message);
+        });
+        this.registerDomEvent(window, 'unhandledrejection', (e: PromiseRejectionEvent) => {
+            void this.errorLog.log('unhandledrejection', e.reason);
+        });
 
         this.setupAutoSync();
 
@@ -62,7 +78,11 @@ export default class RayVaultSyncPlugin extends Plugin {
         // Initialize Mobile Sidebar Widget
         this.mobileWidget = new MobileSyncWidget(this);
         this.app.workspace.onLayoutReady(() => {
-            this.mobileWidget?.mount();
+            try {
+                this.mobileWidget?.mount();
+            } catch (error: unknown) {
+                void this.errorLog.log('widget.mount', error);
+            }
         });
         this.registerEvent(this.app.workspace.on('layout-change', () => {
             this.mobileWidget?.mount();
@@ -85,6 +105,10 @@ export default class RayVaultSyncPlugin extends Plugin {
         } else {
             this.mobileWidget?.destroy();
         }
+    }
+
+    getErrorLog(): ErrorLogManager {
+        return this.errorLog;
     }
 
     setupAutoSync() {
@@ -168,8 +192,8 @@ export default class RayVaultSyncPlugin extends Plugin {
             if (!isAuto) new Notice(`Ray Vault Sync: Synced successfully at ${dateStr}`);
             this.statusBarItemEl.setText(`Ray Sync: Synced at ${dateStr}`);
         } catch (error: unknown) {
-            console.error('Ray Vault Sync error:', error);
             const msg = error instanceof Error ? error.message : String(error);
+            void this.errorLog.log('runSync', error);
             
             this.settings.lastSyncStatus = 'error';
             this.settings.lastSyncMessage = msg;

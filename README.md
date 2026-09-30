@@ -68,6 +68,7 @@ If a file is edited independently on multiple devices without syncing in between
 
 - **Vault Enumeration (`vault.getFiles`)**: As a dedicated synchronization and backup tool, Ray Vault Sync enumerates files in your vault to calculate local SHA hashes and compare them against your remote GitHub repository tree.
 - **Data Privacy**: Your notes and tokens are transmitted directly and exclusively to the official GitHub REST API (`api.github.com`) using your own configured repository and Personal Access Token. No data, telemetry, or analytics are sent to any third-party servers.
+- **Local Error Log**: Recent errors are stored locally on your device (`.obsidian/plugins/ray-vault-sync/error-log.json`, tokens redacted). Nothing is uploaded automatically — use Copy in settings to share manually in a GitHub issue.
 - **Custom Exclusions**: You can restrict which files or folders are accessed via the **Excluded Folders / Patterns** setting. Hidden files, internal directories (`.obsidian`, `.git`), and excluded patterns are strictly ignored.
 
 ---

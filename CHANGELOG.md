@@ -5,6 +5,19 @@ All notable changes to **Ray Vault Sync** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-30
+
+### Added
+- **Local Error Log**: 50-entry redacted crash history stored on-device (no telemetry, no network calls). Survives app restarts to capture mobile startup errors.
+- **Error Log Settings**: Copy / Clear buttons in plugin settings for manual sharing in GitHub issues.
+- **Diagnostics Integration**: `Run Diagnostics` report now includes the last 10 redacted errors.
+
+### Fixed
+- **`this.formatRelativeTime` bug**: `src/mobile-widget.ts` called a non-existent method; now calls the standalone `formatRelativeTime()` function.
+- **Unnecessary assertion**: `src/mobile-widget.ts` uses `querySelector<HTMLElement>()` instead of `as` cast.
+- **Removed `console.error`**: `runSync` failures now go to the local error log (reviewer compliance).
+- **Release attestations**: Build provenance now covers `main.js`, `manifest.json`, and `styles.css`.
+
 ## [1.2.0] - 2026-09-05
 
 ### Added

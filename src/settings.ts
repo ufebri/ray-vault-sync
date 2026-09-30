@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import RayVaultSyncPlugin from './main';
 
 export interface RayVaultSyncSettings {
@@ -44,7 +44,7 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('GitHub Personal Access Token')
-            .setDesc('Fine-grained PAT with Contents: Read and write permissions.')
+            .setDesc('Secret key from GitHub that lets the plugin save your notes. You make it once on the GitHub website — it stays on your device.')
             .addText(text => text
                 .setPlaceholder('github_pat_...')
                 .setValue(this.plugin.settings.githubToken)
@@ -55,7 +55,7 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('GitHub Repository')
-            .setDesc('Format: owner/repo (e.g. ufebri/raylabs-vault)')
+            .setDesc('Where your notes are stored on GitHub. Written as owner/name, for example ufebri/raylabs-vault.')
             .addText(text => text
                 .setPlaceholder('owner/repo')
                 .setValue(this.plugin.settings.repository)
@@ -66,7 +66,7 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Branch')
-            .setDesc('Target branch to synchronize with (default: main)')
+            .setDesc('Which version line to follow. Keep it as main unless you know you need something else.')
             .addText(text => text
                 .setPlaceholder('main')
                 .setValue(this.plugin.settings.branch)
@@ -76,8 +76,8 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Enable Auto-Sync')
-            .setDesc('Automatically synchronize changes in the background while Obsidian is open')
+            .setName('Sync automatically')
+            .setDesc('When on, your notes sync by themselves in the background while Obsidian is open.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.autoSyncEnabled)
                 .onChange(async (value) => {
@@ -87,8 +87,8 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Auto-Sync Interval (minutes)')
-            .setDesc('How often to synchronize automatically (minimum: 1 minute)')
+            .setName('How often to sync')
+            .setDesc('Waiting time between automatic syncs, in minutes. Shortest is 1 minute.')
             .addText(text => text
                 .setPlaceholder('5')
                 .setValue(String(this.plugin.settings.autoSyncInterval))
@@ -102,8 +102,8 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Excluded Folders / Patterns')
-            .setDesc('Comma-separated list of folders or file patterns to ignore during sync (e.g. templates, private, archive, node_modules)')
+            .setName('Folders to skip')
+            .setDesc('Notes in these folders stay only on this device and are never uploaded. Separate with commas, for example: templates, private, archive.')
             .addTextArea(text => text
                 .setPlaceholder('node_modules, .git, ray-vault-sync')
                 .setValue(this.plugin.settings.excludedPaths || 'node_modules, .git, ray-vault-sync')
@@ -113,14 +113,52 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Mobile Sidebar Sync Card')
-            .setDesc('Show quick sync button and last sync info at the top of the file explorer (recommended for mobile)')
+            .setName('Sync button in the file list')
+            .setDesc('Shows a handy Sync button with your last sync time at the top of the file list. Great on phones.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableMobileSidebarWidget)
                 .onChange(async (value) => {
                     this.plugin.settings.enableMobileSidebarWidget = value;
                     await this.plugin.saveSettings();
                     this.plugin.refreshMobileWidget();
+                }));
+
+        new Setting(containerEl)
+            .setName('Trouble history')
+            .setDesc('If sync ever fails, what happened is saved here on this device only — secret keys are hidden. Tap Report to open a pre-filled issue, or Copy to paste it anywhere.')
+            .addButton(btn => btn
+                .setButtonText('Report')
+                .onClick(() => {
+                    void (async () => {
+                        const log = await this.plugin.getErrorLog().formatRecent(10);
+                        const title = encodeURIComponent('[Error report] Ray Vault Sync');
+                        const body = encodeURIComponent(
+                            `**Describe what happened**\n\n\n**Trouble history (auto-attached, secrets hidden)**\n\`\`\`\n${log.slice(0, 6000)}\n\`\`\``
+                        );
+                        window.open(`https://github.com/ufebri/ray-vault-sync/issues/new?title=${title}&body=${body}`);
+                    })();
+                }))
+            .addButton(btn => btn
+                .setButtonText('Copy')
+                .onClick(() => {
+                    void (async () => {
+                        try {
+                            const text = await this.plugin.getErrorLog().formatRecent(20);
+                            await navigator.clipboard.writeText(text);
+                            new Notice('Copied — paste it wherever you ask for help.');
+                        } catch (e: unknown) {
+                            const msg = e instanceof Error ? e.message : String(e);
+                            new Notice(`Copy failed: ${msg}`);
+                        }
+                    })();
+                }))
+            .addButton(btn => btn
+                .setButtonText('Clear')
+                .onClick(() => {
+                    void (async () => {
+                        await this.plugin.getErrorLog().clear();
+                        new Notice('Trouble history cleared.');
+                    })();
                 }));
     }
 }

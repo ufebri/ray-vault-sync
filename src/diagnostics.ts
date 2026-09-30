@@ -2,6 +2,7 @@ import { Notice, App } from 'obsidian';
 import { GitHubClient } from './github-client';
 import { LocalVault } from './local-vault';
 import { SyncEngine } from './sync-core';
+import { ErrorLogManager } from './error-log';
 import { RayVaultSyncSettings } from './settings';
 
 export async function runDiagnostics(
@@ -99,6 +100,17 @@ export async function runDiagnostics(
 
     push('\n---');
     push('Ray Vault Sync — Easy. Free. Seamless.');
+
+    try {
+        const errorLog = new ErrorLogManager(app, () => [settings.githubToken]);
+        const recent = await errorLog.formatRecent(10);
+        push(`\n## Recent Errors (redacted, local only)`);
+        push('```');
+        push(recent);
+        push('```');
+    } catch {
+        /* best effort */
+    }
     
     const reportPath = 'Sync Diagnostics.md';
     try {
