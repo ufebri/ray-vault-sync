@@ -5,6 +5,92 @@ import { SyncEngine } from './sync-core';
 import { ErrorLogManager } from './error-log';
 import { RayVaultSyncSettings } from './settings';
 
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+async function appendLocalStatus(app: App, settings: RayVaultSyncSettings, report: string[]): Promise<boolean> {
+    let lines = ['\n## Local Vault Status'];
+    try {
+        const localVault = new LocalVault(app, settings.excludedPaths);
+        const state = await localVault.getSyncState();
+        const files = await localVault.getFiles();
+        const conflicts = files.filter(file => file.path.includes('.conflict-'));
+        lines = lines.concat([
+            `- Sync State File: Readable (Schema v${state?.schemaVersion || 1})`,
+            `- Last Synced Commit: \`${state?.lastSyncedCommit || 'None (Needs Initial Sync)'}\``,
+            `- Local Tracked Files: ${files.length} files`,
+            `- Active Conflict Copies: ${conflicts.length}`,
+            ...conflicts.map(conflict => `  - \`${conflict.path}\``)
+        ]);
+        return true;
+    } catch (error: unknown) {
+        lines = lines.concat(`- Local Vault Error: ${errorMessage(error)}`);
+        return false;
+    } finally {
+        report.push(...lines);
+    }
+}
+
+async function appendGitHubStatus(settings: RayVaultSyncSettings, report: string[]): Promise<boolean> {
+    let lines = ['\n## GitHub Connectivity Status'];
+    try {
+        if (!settings.githubToken) throw new Error('GitHub token is empty. Please enter your PAT in settings.');
+        if (!settings.repository) throw new Error('GitHub repository is empty. Please enter owner/repo in settings.');
+
+        const client = new GitHubClient(settings.githubToken, settings.repository);
+        const head = await client.getHeadCommit(settings.branch || 'main');
+        const tree = await client.getTree(head);
+        lines = lines.concat([
+            '- Authentication: Valid',
+            `- Remote HEAD Commit: \`${head}\``,
+            `- Remote Tree Listing: Accessible (${tree.length} files tracked)`
+        ]);
+        return true;
+    } catch (error: unknown) {
+        lines = lines.concat(`- GitHub Connection Error: ${errorMessage(error)}`);
+        return false;
+    } finally {
+        report.push(...lines);
+    }
+}
+
+async function appendPlanPreview(
+    app: App,
+    settings: RayVaultSyncSettings,
+    report: string[]
+): Promise<void> {
+    let lines = ['\n## Synchronization Plan Preview'];
+    try {
+        const engine = new SyncEngine(
+            new LocalVault(app, settings.excludedPaths),
+            new GitHubClient(settings.githubToken, settings.repository),
+            settings.branch || 'main'
+        );
+        const { plan } = await engine.calculatePlan();
+        const counts = {
+            NOOP: plan.filter(item => item.action === 'NOOP').length,
+            UPLOAD: plan.filter(item => item.action === 'UPLOAD').length,
+            DOWNLOAD: plan.filter(item => item.action === 'DOWNLOAD').length,
+            DELETE_LOCAL: plan.filter(item => item.action === 'DELETE_LOCAL').length,
+            DELETE_REMOTE: plan.filter(item => item.action === 'DELETE_REMOTE').length,
+            CONFLICT: plan.filter(item => item.action === 'CONFLICT').length
+        };
+        lines = lines.concat([
+            `- Files In Sync (NOOP): ${counts.NOOP}`,
+            `- Pending Uploads: ${counts.UPLOAD}`,
+            `- Pending Downloads: ${counts.DOWNLOAD}`,
+            `- Pending Local Deletions: ${counts.DELETE_LOCAL}`,
+            `- Pending Remote Deletions: ${counts.DELETE_REMOTE}`,
+            `- Potential Conflicts: ${counts.CONFLICT}`
+        ]);
+    } catch (error: unknown) {
+        lines = lines.concat(`- Reconciler Error: ${errorMessage(error)}`);
+    } finally {
+        report.push(...lines);
+    }
+}
+
 export async function runDiagnostics(
     app: App, 
     settings: RayVaultSyncSettings
@@ -24,78 +110,14 @@ export async function runDiagnostics(
     push(`- Repository: \`${settings.repository || 'NOT SET'}\``);
     push(`- Branch: \`${settings.branch || 'main'}\``);
     push(`- Token: \`${maskedToken}\``);
-    push(`- Auto-Sync: ${settings.autoSyncEnabled ? `Enabled (${settings.autoSyncInterval} mins)` : 'Disabled'}`);
+    push(`- Auto-Sync: ${settings.autoSyncEnabled ? 'Enabled (' + settings.autoSyncInterval + ' mins)' : 'Disabled'}`);
 
-    let githubOk = false;
-    let localOk = false;
-
-    // Check Local Vault
-    push(`\n## Local Vault Status`);
-    try {
-        const localVault = new LocalVault(app, settings.excludedPaths);
-        const state = await localVault.getSyncState();
-        push(`- Sync State File: Readable (Schema v${state?.schemaVersion || 1})`);
-        push(`- Last Synced Commit: \`${state?.lastSyncedCommit || 'None (Needs Initial Sync)'}\``);
-        
-        const files = await localVault.getFiles();
-        push(`- Local Tracked Files: ${files.length} files`);
-        
-        const conflicts = files.filter(f => f.path.includes('.conflict-'));
-        push(`- Active Conflict Copies: ${conflicts.length}`);
-        if (conflicts.length > 0) {
-            conflicts.forEach(c => push(`  - \`${c.path}\``));
-        }
-        
-        localOk = true;
-    } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        push(`- Local Vault Error: ${msg}`);
-    }
-
-    // Check GitHub Access
-    push(`\n## GitHub Connectivity Status`);
-    try {
-        if (!settings.githubToken) throw new Error("GitHub token is empty. Please enter your PAT in settings.");
-        if (!settings.repository) throw new Error("GitHub repository is empty. Please enter owner/repo in settings.");
-
-        const gh = new GitHubClient(settings.githubToken, settings.repository);
-        const head = await gh.getHeadCommit(settings.branch || 'main');
-        push(`- Authentication: Valid`);
-        push(`- Remote HEAD Commit: \`${head}\``);
-        
-        const tree = await gh.getTree(head);
-        push(`- Remote Tree Listing: Accessible (${tree.length} files tracked)`);
-        
-        githubOk = true;
-    } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        push(`- GitHub Connection Error: ${msg}`);
-    }
+    const localOk = await appendLocalStatus(app, settings, report);
+    const githubOk = await appendGitHubStatus(settings, report);
 
     // Reconciler Preview
     if (localOk && githubOk) {
-        push(`\n## Synchronization Plan Preview`);
-        try {
-            const engine = new SyncEngine(new LocalVault(app, settings.excludedPaths), new GitHubClient(settings.githubToken, settings.repository), settings.branch || 'main');
-            const { plan } = await engine.calculatePlan();
-            
-            const uploads = plan.filter(p => p.action === 'UPLOAD').length;
-            const downloads = plan.filter(p => p.action === 'DOWNLOAD').length;
-            const deletesL = plan.filter(p => p.action === 'DELETE_LOCAL').length;
-            const deletesR = plan.filter(p => p.action === 'DELETE_REMOTE').length;
-            const conflicts = plan.filter(p => p.action === 'CONFLICT').length;
-            const noops = plan.filter(p => p.action === 'NOOP').length;
-
-            push(`- Files In Sync (NOOP): ${noops}`);
-            push(`- Pending Uploads: ${uploads}`);
-            push(`- Pending Downloads: ${downloads}`);
-            push(`- Pending Local Deletions: ${deletesL}`);
-            push(`- Pending Remote Deletions: ${deletesR}`);
-            push(`- Potential Conflicts: ${conflicts}`);
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            push(`- Reconciler Error: ${msg}`);
-        }
+        await appendPlanPreview(app, settings, report);
     }
 
     push('\n---');
@@ -124,7 +146,7 @@ export async function runDiagnostics(
         }
         new Notice('Ray Vault Sync: Diagnostics complete! Report opened.');
     } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errorMessage(e);
         new Notice(`Ray Vault Sync: Diagnostics failed to write report. ${msg}`);
     }
 }

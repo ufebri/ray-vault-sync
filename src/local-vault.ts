@@ -3,7 +3,7 @@ import { ILocalVault, LocalFile, SyncState } from './interfaces';
 import { isIgnoredPath } from './sync-core';
 
 export class LocalVault implements ILocalVault {
-    private customExcludes: string[] = [];
+    private readonly customExcludes: string[] = [];
 
     private get syncStatePath() {
         return `${this.app.vault.configDir}/plugins/ray-vault-sync/sync-state.json`;
@@ -12,7 +12,7 @@ export class LocalVault implements ILocalVault {
         return `${this.app.vault.configDir}/plugins/raylabs-vault-sync/sync-state.json`;
     }
 
-    constructor(private app: App, customExcludes?: string | string[]) {
+    constructor(private readonly app: App, customExcludes?: string | string[]) {
         if (typeof customExcludes === 'string') {
             this.customExcludes = customExcludes
                 .split(',')
@@ -104,56 +104,67 @@ export class LocalVault implements ILocalVault {
     }
 
     public async writeFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void> {
-        const parts = path.split('/');
-        let currentPath = '';
-        for (let i = 0; i < parts.length - 1; i++) {
-            currentPath += (currentPath ? '/' : '') + parts[i];
-            const exists = await this.app.vault.adapter.exists(currentPath);
-            if (!exists) {
-                try {
-                    await this.app.vault.createFolder(currentPath);
-                } catch (e: unknown) {
-                    const errMsg = e instanceof Error ? e.message : String(e);
-                    if (!errMsg.includes('Folder already exists')) {
-                        throw e;
-                    }
-                }
-            }
-        }
-
+        await this.ensureParentDirectories(path);
         const file = this.app.vault.getAbstractFileByPath(path);
         const existsOnDisk = await this.app.vault.adapter.exists(path);
-        
+
         if (file instanceof TFile) {
             if (isBinary) {
                 await this.app.vault.modifyBinary(file, (content as Uint8Array).buffer);
             } else {
                 await this.app.vault.modify(file, content as string);
             }
-        } else if (existsOnDisk) {
+            return;
+        }
+        if (existsOnDisk) {
             if (isBinary) {
                 await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
             } else {
                 await this.app.vault.adapter.write(path, content as string);
             }
-        } else {
-            try {
-                if (isBinary) {
-                    await this.app.vault.createBinary(path, (content as Uint8Array).buffer);
-                } else {
-                    await this.app.vault.create(path, content as string);
-                }
-            } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                if (errMsg.includes('File already exists')) {
-                    if (isBinary) {
-                        await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
-                    } else {
-                        await this.app.vault.adapter.write(path, content as string);
-                    }
-                } else {
-                    throw e;
-                }
+            return;
+        }
+        await this.createFile(path, content, isBinary);
+    }
+
+    private async ensureParentDirectories(path: string): Promise<void> {
+        const parts = path.split('/');
+        let currentPath = '';
+        const directories: string[] = [];
+        for (const part of parts.slice(0, -1)) {
+            currentPath += (currentPath ? '/' : '') + part;
+            directories.push(currentPath);
+        }
+        await directories.reduce(
+            (sequence, directory) => sequence.then(() => this.ensureParentDirectory(directory)),
+            Promise.resolve()
+        );
+    }
+
+    private async ensureParentDirectory(path: string): Promise<void> {
+        if (await this.app.vault.adapter.exists(path)) return;
+        try {
+            await this.app.vault.createFolder(path);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.includes('Folder already exists')) throw error;
+        }
+    }
+
+    private async createFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void> {
+        try {
+            if (isBinary) {
+                await this.app.vault.createBinary(path, (content as Uint8Array).buffer);
+            } else {
+                await this.app.vault.create(path, content as string);
+            }
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            if (!errMsg.includes('File already exists')) throw e;
+            if (isBinary) {
+                await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
+            } else {
+                await this.app.vault.adapter.write(path, content as string);
             }
         }
     }
@@ -203,8 +214,8 @@ export class LocalVault implements ILocalVault {
         
         const parts = dir.split('/');
         let currentPath = '';
-        for (let i = 0; i < parts.length; i++) {
-            currentPath += (currentPath ? '/' : '') + parts[i];
+        for (const part of parts) {
+            currentPath += (currentPath ? '/' : '') + part;
             if (!(await this.app.vault.adapter.exists(currentPath))) {
                 await this.app.vault.adapter.mkdir(currentPath);
             }

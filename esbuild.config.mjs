@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
-import process from "process";
-import { builtinModules as builtins } from "module";
+import process from "node:process";
+import { builtinModules as builtins } from "node:module";
 
 const banner =
 `/*

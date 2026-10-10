@@ -20,8 +20,8 @@ export function redactText(text: string, secrets: string[]): string {
             out = out.split(s).join('[REDACTED]');
         }
     }
-    out = out.replace(/github_pat_[A-Za-z0-9_]+/g, '[REDACTED]');
-    out = out.replace(/Bearer\s+[A-Za-z0-9_.-]+/gi, 'Bearer [REDACTED]');
+    out = out.replace(/github_pat_\w+/g, '[REDACTED]');
+    out = out.replace(/Bearer\s+[\w.-]+/gi, 'Bearer [REDACTED]');
     return out;
 }
 
@@ -36,10 +36,10 @@ export class ErrorLogManager {
     private writeChain: Promise<void> = Promise.resolve();
 
     constructor(
-        private app: App,
-        private secretsProvider: () => string[] = () => [],
-        private pluginVersion = 'dev',
-        private platform = 'unknown'
+        private readonly app: App,
+        private readonly secretsProvider: () => string[] = () => [],
+        private readonly pluginVersion = 'dev',
+        private readonly platform = 'unknown'
     ) {}
 
     private get logPath(): string {

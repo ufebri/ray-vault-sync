@@ -93,8 +93,8 @@ export class RayVaultSyncSettingTab extends PluginSettingTab {
                 .setPlaceholder('5')
                 .setValue(String(this.plugin.settings.autoSyncInterval))
                 .onChange(async (value) => {
-                    const parsed = parseInt(value, 10);
-                    if (!isNaN(parsed)) {
+                    const parsed = Number.parseInt(value, 10);
+                    if (!Number.isNaN(parsed)) {
                         this.plugin.settings.autoSyncInterval = Math.max(1, parsed);
                         await this.plugin.saveSettings();
                         this.plugin.setupAutoSync();

@@ -133,36 +133,57 @@ export default class RayVaultSyncPlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<RayVaultSyncSettings>);
+        this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<RayVaultSyncSettings>) };
     }
 
     async saveSettings() {
         await this.saveData(this.settings);
     }
 
-    async runSync(isAuto: boolean = false) {
+    private canStartSync(isAuto: boolean): boolean {
         if (this.isSyncing) {
             if (!isAuto) new Notice('Ray Vault Sync: Sync already in progress...');
-            return;
+            return false;
         }
-
         if (Date.now() < this.rateLimitResetTime) {
             if (!isAuto) {
                 const waitMins = Math.ceil((this.rateLimitResetTime - Date.now()) / 60000);
                 new Notice(`Ray Vault Sync: GitHub rate limit cooldown active. Try again in ${waitMins}m.`);
             }
-            return;
+            return false;
         }
-
         if (!this.settings.githubToken) {
             if (!isAuto) new Notice('Ray Vault Sync: GitHub PAT not configured.');
-            return;
+            return false;
         }
-
         if (!this.settings.repository) {
             if (!isAuto) new Notice('Ray Vault Sync: GitHub repository not configured.');
-            return;
+            return false;
         }
+        return true;
+    }
+
+    private async handleSyncError(error: unknown, isAuto: boolean): Promise<void> {
+        const msg = error instanceof Error ? error.message : String(error);
+        void this.errorLog.log('runSync', error);
+        this.settings.lastSyncStatus = 'error';
+        this.settings.lastSyncMessage = msg;
+        await this.saveSettings();
+        this.mobileWidget?.setError(msg);
+
+        if (msg.includes('Rate Limit') || msg.includes('abuse limit')) {
+            const match = /reset in (\d+)s/.exec(msg);
+            const waitMs = match ? Number.parseInt(match[1], 10) * 1000 : 60 * 60 * 1000;
+            this.rateLimitResetTime = Date.now() + waitMs;
+            new Notice(`Ray Vault Sync: Rate limit hit. Cooling down for ${Math.ceil(waitMs/60000)}m.`);
+        } else if (!isAuto) {
+            new Notice(`Ray Vault Sync failed: ${msg}`);
+        }
+        this.statusBarItemEl.setText('Ray Sync: Error');
+    }
+
+    async runSync(isAuto: boolean = false) {
+        if (!this.canStartSync(isAuto)) return;
 
         this.isSyncing = true;
         this.settings.lastSyncStatus = 'syncing';
@@ -192,26 +213,7 @@ export default class RayVaultSyncPlugin extends Plugin {
             if (!isAuto) new Notice(`Ray Vault Sync: Synced successfully at ${dateStr}`);
             this.statusBarItemEl.setText(`Ray Sync: Synced at ${dateStr}`);
         } catch (error: unknown) {
-            const msg = error instanceof Error ? error.message : String(error);
-            void this.errorLog.log('runSync', error);
-            
-            this.settings.lastSyncStatus = 'error';
-            this.settings.lastSyncMessage = msg;
-            await this.saveSettings();
-
-            this.mobileWidget?.setError(msg);
-
-            if (msg.includes('Rate Limit') || msg.includes('abuse limit')) {
-                // If it's a rate limit error without a specific reset time returned, default to 1 hour
-                const match = msg.match(/reset in (\d+)s/);
-                const waitMs = match ? parseInt(match[1]) * 1000 : 60 * 60 * 1000;
-                this.rateLimitResetTime = Date.now() + waitMs;
-                new Notice(`Ray Vault Sync: Rate limit hit. Cooling down for ${Math.ceil(waitMs/60000)}m.`);
-            } else if (!isAuto) {
-                new Notice(`Ray Vault Sync failed: ${msg}`);
-            }
-            
-            this.statusBarItemEl.setText('Ray Sync: Error');
+            await this.handleSyncError(error, isAuto);
         } finally {
             this.isSyncing = false;
         }

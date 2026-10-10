@@ -25,11 +25,15 @@ class MockGitHub implements IGitHubClient {
     public headCommit = 'abc';
     public tree: RemoteFile[] = [];
     public blobs: Record<string, string> = {};
+    public changes: Array<{ path: string; content?: string; sha?: string | null }> = [];
 
     async getHeadCommit(branch: string) { return this.headCommit; }
     async getTree(sha: string) { return this.tree; }
     async getBlob(sha: string) { return this.blobs[sha]; }
-    async createTree() { return 'new-tree-sha'; }
+    async createTree(_base: string, changes: Array<{ path: string; content?: string; sha?: string | null }>) {
+        this.changes.push(...changes);
+        return 'new-tree-sha';
+    }
     async createCommit(m: string, t: string, p: string[]) {
         this.headCommit = 'def';
         return this.headCommit;
@@ -59,7 +63,7 @@ describe('SyncEngine (3-Way Merge Core)', () => {
         vault.syncState = { schemaVersion: 1, lastSyncedCommit: 'abc', baseFiles: { 'file.md': 'h1' } };
 
         const { plan } = await engine.calculatePlan();
-        expect(plan.length).toBe(1);
+        expect(plan).toHaveLength(1);
         expect(plan[0].action).toBe('NOOP');
     });
 
@@ -88,6 +92,25 @@ describe('SyncEngine (3-Way Merge Core)', () => {
 
         const { plan } = await engine.calculatePlan();
         expect(plan.find(p => p.path === 'file.md')?.action).toBe('CONFLICT');
+    });
+
+    test('Concurrent edits preserve local content and save the remote version as a conflict copy', async () => {
+        vault.files = { 'file.md': { path: 'file.md', hash: 'h3', content: 'local edit', isBinary: false } };
+        github.tree = [{ path: 'file.md', hash: 'h2', sha: 's2' }];
+        github.blobs.s2 = 'remote edit';
+        vault.syncState = { schemaVersion: 1, lastSyncedCommit: 'abc', baseFiles: { 'file.md': 'h1' } };
+
+        await engine.executeSync();
+
+        const conflictPath = Object.keys(vault.files).find(path => path.includes('.conflict-'));
+        expect(vault.files['file.md'].content).toBe('local edit');
+        expect(conflictPath).toBeDefined();
+        expect(vault.files[conflictPath!].content).toBe('remote edit');
+        expect(github.changes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ path: 'file.md', content: 'local edit' }),
+            expect.objectContaining({ path: conflictPath, content: 'remote edit' })
+        ]));
+        expect(vault.syncState?.baseFiles[conflictPath!]).toBe('h2');
     });
 
     test('Remote Race Condition: throws safe error on branch drift', async () => {
