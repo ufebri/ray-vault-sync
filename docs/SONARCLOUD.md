@@ -1,28 +1,30 @@
 # SonarCloud setup and quality gate
 
-This project uses SonarQube Cloud's GitHub Automatic Analysis. SonarCloud
-analyzes the default branch and pull requests and posts a `SonarCloud Code
-Analysis` quality-gate check directly to GitHub. Keep Automatic Analysis
-enabled. Do not also add a CI scanner: SonarCloud rejects CI-based analysis
-while Automatic Analysis is enabled. Automatic Analysis does not import test
-coverage; the GitHub Actions `verify` job still runs Jest with coverage and
-builds the plugin independently.
+This project uses CI-based SonarQube Cloud analysis from GitHub Actions so that
+the Jest LCOV report is imported. Automatic Analysis must be disabled in the
+SonarCloud project before the scanner runs; SonarCloud rejects CI-based
+analysis while Automatic Analysis is enabled.
 
 ## Repository configuration
 
-1. Confirm **Automatic Analysis** is enabled in the project's
-   **Administration → Analysis Method** settings.
+1. In the project's **Administration → Analysis Method**, turn
+   **SonarQube Cloud Automatic Analysis** off and select GitHub Actions as the
+   supported analysis method.
 2. Confirm the project is bound to the GitHub repository
    `ufebri/ray-vault-sync` and pull request analysis is enabled.
 3. Require both `verify` and `SonarCloud Code Analysis` checks on the default
    branch before merging changes.
-4. Run CI for the default branch to establish the first analysis and inspect
-   the full project issue inventory as well as the Quality Gate.
+4. Ensure the repository secrets `SONAR_TOKEN`, `SONAR_ORGANIZATION`, and
+   `SONAR_PROJECT_KEY` are configured.
+5. After disabling Automatic Analysis, add the repository variable
+   `SONAR_CI_ENABLED=true` to enable the scanner step.
+6. Run CI for the default branch and confirm the `coverage` measure is present
+   in SonarCloud, not only that the Quality Gate passes.
 
-Automatic Analysis needs no Sonar token or project-key secrets in GitHub
-Actions. If CI-based scanning is deliberately adopted later, first disable
-Automatic Analysis in SonarCloud, then configure the scanner token and project
-identifiers as repository secrets.
+`sonar-project.properties` points the scanner at `coverage/lcov.info`, which
+the Jest test step must generate before analysis. Pull requests from forks do
+not receive repository secrets; do not expose `SONAR_TOKEN` to untrusted code.
+The scanner step runs on `main` and same-repository pull requests only.
 
 Do not create a version tag while the release freeze is active.
 

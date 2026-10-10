@@ -91,12 +91,17 @@ export class GitHubClient implements IGitHubClient {
             .filter((t) => t.type === 'blob')
             .map((t) => ({
                 path: t.path,
-                sha: t.sha,
-                hash: t.sha // GitHub blob SHAs serve as stable hashes
+                sha: t.sha
             }));
     }
 
     public async getBlob(sha: string, isBinary: boolean): Promise<string | Uint8Array> {
+        const bytes = await this.getBlobBytes(sha);
+        if (isBinary) return bytes;
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+
+    public async getBlobBytes(sha: string): Promise<Uint8Array> {
         const data = await this.request<{ content: string }>(`/git/blobs/${sha}`);
         const base64Content = data.content.replace(/\n/g, ''); // GitHub returns base64 with newlines
         
@@ -105,12 +110,7 @@ export class GitHubClient implements IGitHubClient {
         for (let i = 0; i < binaryStr.length; i++) {
             bytes[i] = binaryStr.codePointAt(i)!;
         }
-
-        if (isBinary) {
-            return bytes;
-        }
-        
-        return new TextDecoder('utf-8').decode(bytes);
+        return bytes;
     }
 
     public async createTree(baseTreeSha: string, tree: GitTreeItem[]): Promise<string> {

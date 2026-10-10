@@ -27,20 +27,19 @@ export class LocalVault implements ILocalVault {
         return this.customExcludes;
     }
 
-    private async sha1(buffer: ArrayBuffer): Promise<string> {
-        const hashBuffer = await crypto.subtle.digest('SHA-1', buffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    private toArrayBuffer(data: Uint8Array): ArrayBuffer {
+        const copy = new Uint8Array(data.byteLength);
+        copy.set(data);
+        return copy.buffer;
     }
 
-    private async getGithubBlobSha(buffer: ArrayBuffer): Promise<string> {
-        const length = buffer.byteLength;
-        const prefix = new TextEncoder().encode(`blob ${length}\0`);
-        const combined = new Uint8Array(prefix.byteLength + length);
-        combined.set(prefix, 0);
-        combined.set(new Uint8Array(buffer), prefix.byteLength);
-        
-        return this.sha1(combined.buffer);
+    private async sha256(buffer: ArrayBufferLike | Uint8Array): Promise<string> {
+        const source = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        const bytes = new Uint8Array(source.byteLength);
+        bytes.set(source);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', bytes.buffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     /**
@@ -59,7 +58,7 @@ export class LocalVault implements ILocalVault {
             if (isIgnoredPath(file.path, this.customExcludes)) return;
 
             const buffer = await this.app.vault.readBinary(file);
-            const hash = await this.getGithubBlobSha(buffer);
+            const hash = await this.sha256(buffer);
             const isBinary = !['md', 'json', 'txt', 'csv', 'yaml', 'yml'].includes(file.extension.toLowerCase());
 
             localFiles.push({
@@ -76,7 +75,7 @@ export class LocalVault implements ILocalVault {
     public async readFile(path: string): Promise<LocalFile> {
         const file = this.app.vault.getAbstractFileByPath(path);
         
-        let buffer: ArrayBuffer;
+        let buffer: ArrayBufferLike | Uint8Array;
         let isBinary = false;
         
         if (file instanceof TFile) {
@@ -90,7 +89,7 @@ export class LocalVault implements ILocalVault {
             isBinary = !['md', 'json', 'txt', 'csv', 'yaml', 'yml'].includes(ext);
         }
 
-        const hash = await this.getGithubBlobSha(buffer);
+        const hash = await this.sha256(buffer);
 
         let content: string | undefined;
         let binaryData: Uint8Array | undefined;
@@ -111,7 +110,7 @@ export class LocalVault implements ILocalVault {
 
         if (file instanceof TFile) {
             if (isBinary) {
-                await this.app.vault.modifyBinary(file, (content as Uint8Array).buffer);
+                await this.app.vault.modifyBinary(file, this.toArrayBuffer(content as Uint8Array));
             } else {
                 await this.app.vault.modify(file, content as string);
             }
@@ -119,7 +118,7 @@ export class LocalVault implements ILocalVault {
         }
         if (existsOnDisk) {
             if (isBinary) {
-                await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
+                await this.app.vault.adapter.writeBinary(path, this.toArrayBuffer(content as Uint8Array));
             } else {
                 await this.app.vault.adapter.write(path, content as string);
             }
@@ -155,7 +154,7 @@ export class LocalVault implements ILocalVault {
     private async createFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void> {
         try {
             if (isBinary) {
-                await this.app.vault.createBinary(path, (content as Uint8Array).buffer);
+                await this.app.vault.createBinary(path, this.toArrayBuffer(content as Uint8Array));
             } else {
                 await this.app.vault.create(path, content as string);
             }
@@ -163,7 +162,7 @@ export class LocalVault implements ILocalVault {
             const errMsg = e instanceof Error ? e.message : String(e);
             if (!errMsg.includes('File already exists')) throw e;
             if (isBinary) {
-                await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
+                await this.app.vault.adapter.writeBinary(path, this.toArrayBuffer(content as Uint8Array));
             } else {
                 await this.app.vault.adapter.write(path, content as string);
             }
@@ -199,7 +198,6 @@ export class LocalVault implements ILocalVault {
             try {
                 const data = await this.app.vault.adapter.read(this.legacySyncStatePath);
                 const state = JSON.parse(data) as SyncState;
-                await this.saveSyncState(state);
                 return state;
             } catch {
                 /* legacy migration failed, ignore */
@@ -210,7 +208,7 @@ export class LocalVault implements ILocalVault {
     }
 
     public async saveSyncState(state: SyncState): Promise<void> {
-        state.schemaVersion = 1;
+        state.schemaVersion = 2;
         const dir = this.syncStatePath.substring(0, this.syncStatePath.lastIndexOf('/'));
         
         const parts = dir.split('/');
