@@ -117,7 +117,7 @@ export class MobileSyncWidget {
         if (this.statusDotEl) {
             this.statusDotEl.className = 'ray-vault-sync-status-dot error';
         }
-        const shortError = errorMsg && errorMsg.toLowerCase().includes('rate limit') ? 'Rate limit' : 'Sync Error';
+        const shortError = errorMsg?.toLowerCase().includes('rate limit') ? 'Rate limit' : 'Sync Error';
         this.statusTextEl?.setText(shortError);
         if (errorMsg) this.statusTextEl?.setAttribute('title', errorMsg);
     }
