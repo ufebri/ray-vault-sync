@@ -6,3 +6,4 @@ dist/
 coverage/
 .obsidian/
 AGENT.md
+/.github/agents/
