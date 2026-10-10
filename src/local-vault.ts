@@ -54,9 +54,10 @@ export class LocalVault implements ILocalVault {
         const allFiles = this.app.vault.getFiles();
         const localFiles: LocalFile[] = [];
 
-        for (const file of allFiles) {
-            if (isIgnoredPath(file.path, this.customExcludes)) continue;
-            
+        await allFiles.reduce(async (sequence, file) => {
+            await sequence;
+            if (isIgnoredPath(file.path, this.customExcludes)) return;
+
             const buffer = await this.app.vault.readBinary(file);
             const hash = await this.getGithubBlobSha(buffer);
             const isBinary = !['md', 'json', 'txt', 'csv', 'yaml', 'yml'].includes(file.extension.toLowerCase());
@@ -68,7 +69,7 @@ export class LocalVault implements ILocalVault {
                 content: isBinary ? undefined : new TextDecoder().decode(buffer),
                 binaryData: isBinary ? new Uint8Array(buffer) : undefined,
             });
-        }
+        }, Promise.resolve());
         return localFiles;
     }
 
@@ -214,12 +215,13 @@ export class LocalVault implements ILocalVault {
         
         const parts = dir.split('/');
         let currentPath = '';
-        for (const part of parts) {
+        await parts.reduce(async (sequence, part) => {
+            await sequence;
             currentPath += (currentPath ? '/' : '') + part;
             if (!(await this.app.vault.adapter.exists(currentPath))) {
                 await this.app.vault.adapter.mkdir(currentPath);
             }
-        }
+        }, Promise.resolve());
         
         await this.app.vault.adapter.write(this.syncStatePath, JSON.stringify(state, null, 2));
     }
