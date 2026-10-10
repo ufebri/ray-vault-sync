@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.9.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Tests with Coverage
+        run: pnpm test --coverage --coverageReporters=lcov
+
+      - name: Build Plugin
+        run: pnpm run build
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-coverage
+          path: coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 1
+
+  sonar:
+    needs: verify
+    if: >-
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Coverage Report
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-coverage
+          path: coverage
+
+      - name: Validate SonarCloud configuration
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION || secrets.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || secrets.SONAR_PROJECT_KEY }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ] || [ -z "$SONAR_ORGANIZATION" ] || [ -z "$SONAR_PROJECT_KEY" ]; then
+            echo "::error::SonarCloud is required. Configure the SONAR_TOKEN secret and SONAR_ORGANIZATION and SONAR_PROJECT_KEY as repository variables or secrets."
+            exit 1
+          fi
+
+      - name: Analyze with SonarCloud
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION || secrets.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY || secrets.SONAR_PROJECT_KEY }}
+        with:
+          args: >
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.qualitygate.wait=true

@@ -11,26 +11,42 @@ permissions:
   attestations: write
 
 jobs:
+  release-frozen:
+    if: vars.RELEASES_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop while releases are frozen
+        run: |
+          echo "::error::Releases are frozen. Do not create version tags until release verification is complete."
+          exit 1
+
   build:
+    if: vars.RELEASES_ENABLED == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.9.1
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Run Tests
-        run: npm test
+        run: pnpm test
 
       - name: Build Plugin
-        run: npm run build
+        run: pnpm run build
 
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v2
