@@ -44,31 +44,33 @@ export interface FileSyncPlan {
     path: string;
     action: SyncActionType;
     localHash?: string;
-    remoteHash?: string;
     baseHash?: string;
+    baseRemoteHash?: string;
     remoteSha?: string;
 }
 
-function getSyncAction(
-    baseHash: string | undefined,
-    localHash: string | undefined,
-    remoteHash: string | undefined
-): SyncActionType {
-    if (localHash === remoteHash) return 'NOOP';
-    if (localHash && remoteHash === baseHash) return 'UPLOAD';
-    if (remoteHash && localHash === baseHash) return 'DOWNLOAD';
-    if (localHash && !remoteHash && !baseHash) return 'UPLOAD';
-    if (!localHash && remoteHash && !baseHash) return 'DOWNLOAD';
-    if (!localHash && baseHash && remoteHash === baseHash) return 'DELETE_REMOTE';
-    if (!remoteHash && baseHash && localHash === baseHash) return 'DELETE_LOCAL';
-    if (!localHash && !remoteHash) return 'NOOP';
-    return 'CONFLICT';
+async function hashBytes(bytes: Uint8Array): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', bytes.slice().buffer);
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function decodeText(bytes: Uint8Array): string {
+    return new TextDecoder('utf-8').decode(bytes);
+}
+
+function isSha1(value: string): boolean {
+    return /^[a-f0-9]{40}$/i.test(value);
+}
+
+function isSha256(value: string): boolean {
+    return /^[a-f0-9]{64}$/i.test(value);
 }
 
 interface SyncProcessingState {
     newBaseFiles: Record<string, string>;
     treeChanges: GitTreeItem[];
     hasUploadsOrDeletes: boolean;
+    remoteContent: Map<string, Uint8Array>;
 }
 
 export class SyncEngine {
@@ -82,69 +84,180 @@ export class SyncEngine {
         plan: FileSyncPlan[],
         remoteHead: string,
         baseState: SyncState,
-        localMap: Map<string, LocalFile>
+        localMap: Map<string, LocalFile>,
+        remoteTree: RemoteFile[],
+        remoteContent: Map<string, Uint8Array>
     }> {
         const remoteHead = await this.remote.getHeadCommit(this.branch);
         const remoteTree = await this.remote.getTree(remoteHead);
         const localFiles = await this.local.getFiles();
         
-        let baseState = await this.local.getSyncState();
-        baseState ??= { schemaVersion: 1, lastSyncedCommit: '', baseFiles: {} };
-
-        const plan = this.reconcile(baseState.baseFiles, localFiles, remoteTree);
+        const storedState = await this.local.getSyncState();
+        const baseState = await this.upgradeState(storedState);
+        const remoteContent = new Map<string, Uint8Array>();
+        const plan = await this.reconcile(baseState, localFiles, remoteTree, remoteContent);
         const localMap = new Map<string, LocalFile>();
         for (const lf of localFiles) localMap.set(lf.path, lf);
 
-        return { plan, remoteHead, baseState, localMap };
+        return { plan, remoteHead, baseState, localMap, remoteTree, remoteContent };
     }
 
-    private reconcile(
-        base: Record<string, string>, 
-        local: LocalFile[], 
-        remote: RemoteFile[]
-    ): FileSyncPlan[] {
-        const localMap = new Map<string, LocalFile>();
-        for (const lf of local) localMap.set(lf.path, lf);
-
-        const remoteMap = new Map<string, RemoteFile>();
-        for (const rf of remote) remoteMap.set(rf.path, rf);
-
-        const allPaths = new Set([...localMap.keys(), ...remoteMap.keys(), ...Object.keys(base)]);
-        const plan: FileSyncPlan[] = [];
-
-        const customExcludes = this.local.getCustomExcludes ? this.local.getCustomExcludes() : [];
-
-        for (const path of allPaths) {
-            if (isIgnoredPath(path, customExcludes)) continue; // Ignore hidden files, node_modules, and custom user excludes
-
-            const bHash = base[path];
-            const lHash = localMap.get(path)?.hash;
-            const rHash = remoteMap.get(path)?.hash;
-            const rSha = remoteMap.get(path)?.sha;
-
-            plan.push({
-                path,
-                action: getSyncAction(bHash, lHash, rHash),
-                localHash: lHash,
-                remoteHash: rHash,
-                baseHash: bHash,
-                remoteSha: rSha
-            });
+    private async upgradeState(storedState: SyncState | null): Promise<SyncState> {
+        if (!storedState) return { schemaVersion: 2, lastSyncedCommit: '', baseFiles: {}, remoteBaseFiles: {} };
+        if (storedState.schemaVersion === 2) return this.validateCurrentState(storedState);
+        if (storedState.schemaVersion !== undefined && storedState.schemaVersion !== 1) {
+            throw new Error(`Unsupported sync state schema version ${storedState.schemaVersion}.`);
         }
+        return this.migrateLegacyState(storedState);
+    }
 
-        return plan;
+    private validateCurrentState(state: SyncState): SyncState {
+        if (!state.remoteBaseFiles) {
+            throw new Error('Invalid sync state schema v2: remote SHA baselines are missing.');
+        }
+        for (const [path, hash] of Object.entries(state.baseFiles)) {
+            if (!isSha256(hash) || !isSha1(state.remoteBaseFiles[path] ?? '')) {
+                throw new Error(`Invalid sync state baseline for "${path}"; refusing to reinterpret its hash.`);
+            }
+        }
+        for (const path of Object.keys(state.remoteBaseFiles)) {
+            if (!(path in state.baseFiles)) {
+                throw new Error(`Invalid sync state remote baseline for "${path}"; refusing to reinterpret its hash.`);
+            }
+        }
+        return state;
+    }
+
+    private async migrateLegacyState(storedState: SyncState): Promise<SyncState> {
+        // v1 used Git SHA-1 values as both local and remote baselines. Recover each
+        // historical blob by its stored object ID before allowing any vault writes.
+        const baselines = await Object.entries(storedState.baseFiles).reduce(
+            async (previous, [path, oldSha]) => {
+                const migrated = await previous;
+                const baseline = await this.migrateLegacyBaseline(path, oldSha);
+                migrated.baseFiles[path] = baseline.localHash;
+                migrated.remoteBaseFiles[path] = baseline.remoteSha;
+                return migrated;
+            },
+            Promise.resolve({
+                baseFiles: {} as Record<string, string>,
+                remoteBaseFiles: {} as Record<string, string>
+            })
+        );
+        return {
+            schemaVersion: 2,
+            lastSyncedCommit: storedState.lastSyncedCommit,
+            ...baselines
+        };
+    }
+
+    private async migrateLegacyBaseline(path: string, oldSha: string): Promise<{ localHash: string; remoteSha: string }> {
+        if (!isSha1(oldSha)) {
+            throw new Error(`Cannot migrate v1 sync state: invalid Git blob SHA for "${path}".`);
+        }
+        try {
+            const bytes = await this.remote.getBlobBytes(oldSha);
+            return {
+                localHash: await hashBytes(bytes),
+                remoteSha: oldSha.toLowerCase()
+            };
+        } catch {
+            throw new Error(
+                `Cannot migrate v1 sync state: baseline content for "${path}" could not be recovered from GitHub. ` +
+                'Sync stopped before changing vault files; restore the referenced Git blob and retry.'
+            );
+        }
+    }
+
+    private async getPathAction(
+        baseHash: string | undefined,
+        baseRemoteHash: string | undefined,
+        localFile: LocalFile | undefined,
+        remoteFile: RemoteFile | undefined,
+        remoteContent: Map<string, Uint8Array>
+    ): Promise<SyncActionType> {
+        if (localFile && remoteFile) {
+            return this.getExistingPathAction(baseHash, baseRemoteHash, localFile, remoteFile, remoteContent);
+        }
+        if (localFile) {
+            if (!baseHash) return 'UPLOAD';
+            return localFile.hash === baseHash ? 'DELETE_LOCAL' : 'UPLOAD';
+        }
+        if (remoteFile) {
+            if (!baseHash) return 'DOWNLOAD';
+            return remoteFile.sha === baseRemoteHash ? 'DELETE_REMOTE' : 'DOWNLOAD';
+        }
+        return 'NOOP';
+    }
+
+    private async getExistingPathAction(
+        baseHash: string | undefined,
+        baseRemoteHash: string | undefined,
+        localFile: LocalFile,
+        remoteFile: RemoteFile,
+        remoteContent: Map<string, Uint8Array>
+    ): Promise<SyncActionType> {
+        if (!baseHash) return this.compareCandidate(localFile, remoteFile, remoteContent);
+        const localChanged = localFile.hash !== baseHash;
+        const remoteChanged = remoteFile.sha !== baseRemoteHash;
+        if (!localChanged && !remoteChanged) return 'NOOP';
+        if (localChanged && !remoteChanged) return 'UPLOAD';
+        if (!localChanged && remoteChanged) return 'DOWNLOAD';
+        return this.compareCandidate(localFile, remoteFile, remoteContent);
+    }
+
+    private async reconcile(
+        baseState: SyncState,
+        local: LocalFile[],
+        remote: RemoteFile[],
+        remoteContent: Map<string, Uint8Array>
+    ): Promise<FileSyncPlan[]> {
+        const localMap = new Map(local.map(file => [file.path, file]));
+        const remoteMap = new Map(remote.map(file => [file.path, file]));
+        const customExcludes = this.local.getCustomExcludes ? this.local.getCustomExcludes() : [];
+        const allPaths = [...new Set([
+            ...localMap.keys(),
+            ...remoteMap.keys(),
+            ...Object.keys(baseState.baseFiles)
+        ])].filter(path => !isIgnoredPath(path, customExcludes));
+
+        return Promise.all(allPaths.map(async path => {
+            const localFile = localMap.get(path);
+            const remoteFile = remoteMap.get(path);
+            const baseHash = baseState.baseFiles[path];
+            const baseRemoteHash = baseState.remoteBaseFiles?.[path];
+            const action = await this.getPathAction(
+                baseHash,
+                baseRemoteHash,
+                localFile,
+                remoteFile,
+                remoteContent
+            );
+            return {
+                path,
+                action,
+                localHash: localFile?.hash,
+                baseHash,
+                baseRemoteHash,
+                remoteSha: remoteFile?.sha
+            };
+        }));
+    }
+
+    private async compareCandidate(
+        localFile: LocalFile,
+        remoteFile: RemoteFile,
+        remoteContent: Map<string, Uint8Array>
+    ): Promise<SyncActionType> {
+        const bytes = await this.remote.getBlobBytes(remoteFile.sha);
+        remoteContent.set(localFile.path, bytes);
+        return (await hashBytes(bytes)) === localFile.hash ? 'NOOP' : 'CONFLICT';
     }
 
     public async executeSync(onProgress?: (msg: string) => void): Promise<void> {
         // Step 1: Calculate plan
         onProgress?.('Scanning diffs...');
-        const { plan, remoteHead, baseState, localMap } = await this.calculatePlan();
-        
-        const needsAction = plan.some(p => p.action !== 'NOOP');
-        if (!needsAction && remoteHead === baseState.lastSyncedCommit) {
-            onProgress?.('Already up to date');
-            return; // Already up to date
-        }
+        const { plan, remoteHead, localMap, remoteTree, remoteContent } = await this.calculatePlan();
 
         // Step 2: Handle Conflicts & Downloads
         const newBaseFiles: Record<string, string> = {};
@@ -152,7 +265,8 @@ export class SyncEngine {
         const processingState: SyncProcessingState = {
             newBaseFiles,
             treeChanges,
-            hasUploadsOrDeletes: false
+            hasUploadsOrDeletes: false,
+            remoteContent
         };
 
         const actionItems = plan.filter(p => p.action !== 'NOOP');
@@ -164,13 +278,15 @@ export class SyncEngine {
         );
 
         let newCommit = remoteHead;
-        
+        let finalRemoteTree = remoteTree;
+
         // Step 3: Remote Atomic Commit
         if (processingState.hasUploadsOrDeletes) {
             const latestRemoteHead = await this.remote.getHeadCommit(this.branch);
             if (latestRemoteHead !== remoteHead) {
                 throw new Error("Remote race detected: branch moved during sync. Please retry.");
             }
+
 
             // Chunk tree changes into batches of 500 to keep payload well within GitHub limits
             const BATCH_SIZE = 500;
@@ -193,14 +309,28 @@ export class SyncEngine {
             
             onProgress?.('Updating remote branch...');
             await this.remote.updateRef(this.branch, newCommit);
+
+            // A created blob SHA is a Git object identifier, not a local content
+            // digest. Refresh all remote baselines from the committed tree.
+            finalRemoteTree = await this.remote.getTree(newCommit);
         }
 
         // Step 4: Update Base State
+        const finalRemoteMap = new Map(finalRemoteTree.map(file => [file.path, file]));
+        const remoteBaseFiles: Record<string, string> = {};
+        for (const path of Object.keys(newBaseFiles)) {
+            const remoteSha = finalRemoteMap.get(path)?.sha;
+            if (!remoteSha) {
+                throw new Error(`Cannot save sync state: remote Git blob SHA is missing for "${path}".`);
+            }
+            remoteBaseFiles[path] = remoteSha;
+        }
         onProgress?.('Saving local sync state...');
         await this.local.saveSyncState({
-            schemaVersion: 1,
+            schemaVersion: 2,
             lastSyncedCommit: newCommit,
-            baseFiles: newBaseFiles
+            baseFiles: newBaseFiles,
+            remoteBaseFiles
         });
     }
 
@@ -243,9 +373,10 @@ export class SyncEngine {
             case 'DOWNLOAD': {
                 onProgress?.(`Downloading ${item.path}...`);
                 const isBinary = this.isBinaryPath(item.path);
-                const content = await this.remote.getBlob(item.remoteSha!, isBinary);
+                const bytes = await this.remote.getBlobBytes(item.remoteSha!);
+                const content = isBinary ? bytes : decodeText(bytes);
                 await this.local.writeFile(item.path, content, isBinary);
-                state.newBaseFiles[item.path] = item.remoteHash!;
+                state.newBaseFiles[item.path] = await hashBytes(bytes);
                 return;
             }
             case 'UPLOAD': {
@@ -273,35 +404,31 @@ export class SyncEngine {
         localMap: Map<string, LocalFile>,
         state: SyncProcessingState
     ): Promise<void> {
-        if (item.remoteHash && item.remoteSha) {
+        if (item.remoteSha) {
             const conflictPath = this.getConflictPath(item.path);
             const isBinary = this.isBinaryPath(item.path);
-            const remoteContent = await this.remote.getBlob(item.remoteSha, isBinary);
+            const remoteBytes = state.remoteContent.get(item.path) ??
+                await this.remote.getBlobBytes(item.remoteSha);
+            state.remoteContent.set(item.path, remoteBytes);
+            const remoteContent = isBinary ? remoteBytes : decodeText(remoteBytes);
             await this.local.writeFile(conflictPath, remoteContent, isBinary);
             const localFile = localMap.get(item.path) || await this.local.readFile(item.path);
             await this.addLocalFileToTree(item.path, localFile, state.treeChanges);
 
             if (isBinary) {
-                const conflictSha = await this.remote.createBlob(remoteContent, true);
+                const conflictSha = await this.remote.createBlob(remoteBytes, true);
                 state.treeChanges.push({ path: conflictPath, mode: '100644', type: 'blob', sha: conflictSha });
             } else {
                 state.treeChanges.push({
                     path: conflictPath,
                     mode: '100644',
                     type: 'blob',
-                    content: typeof remoteContent === 'string' ? remoteContent : ''
+                    content: remoteContent as string
                 });
             }
 
             state.newBaseFiles[item.path] = item.localHash!;
-            state.newBaseFiles[conflictPath] = item.remoteHash;
-            state.hasUploadsOrDeletes = true;
-            return;
-        }
-        if (item.localHash && !item.remoteHash) {
-            const localFile = localMap.get(item.path) || await this.local.readFile(item.path);
-            await this.addLocalFileToTree(item.path, localFile, state.treeChanges);
-            state.newBaseFiles[item.path] = item.localHash;
+            state.newBaseFiles[conflictPath] = await hashBytes(remoteBytes);
             state.hasUploadsOrDeletes = true;
         }
     }
