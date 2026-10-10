@@ -158,9 +158,10 @@ export class SyncEngine {
         const actionItems = plan.filter(p => p.action !== 'NOOP');
         onProgress?.(`Processing ${actionItems.length} changes...`);
 
-        for (const item of plan) {
-            await this.processPlanItem(item, localMap, processingState, onProgress);
-        }
+        await plan.reduce(
+            (sequence, item) => sequence.then(() => this.processPlanItem(item, localMap, processingState, onProgress)),
+            Promise.resolve()
+        );
 
         let newCommit = remoteHead;
         

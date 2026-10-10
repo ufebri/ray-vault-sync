@@ -10,41 +10,48 @@ function errorMessage(error: unknown): string {
 }
 
 async function appendLocalStatus(app: App, settings: RayVaultSyncSettings, report: string[]): Promise<boolean> {
-    report.push('\n## Local Vault Status');
+    let lines = ['\n## Local Vault Status'];
     try {
         const localVault = new LocalVault(app, settings.excludedPaths);
         const state = await localVault.getSyncState();
-        report.push(`- Sync State File: Readable (Schema v${state?.schemaVersion || 1})`);
-        report.push(`- Last Synced Commit: \`${state?.lastSyncedCommit || 'None (Needs Initial Sync)'}\``);
-
         const files = await localVault.getFiles();
-        report.push(`- Local Tracked Files: ${files.length} files`);
         const conflicts = files.filter(file => file.path.includes('.conflict-'));
-        report.push(`- Active Conflict Copies: ${conflicts.length}`);
-        for (const conflict of conflicts) report.push(`  - \`${conflict.path}\``);
+        lines = lines.concat([
+            `- Sync State File: Readable (Schema v${state?.schemaVersion || 1})`,
+            `- Last Synced Commit: \`${state?.lastSyncedCommit || 'None (Needs Initial Sync)'}\``,
+            `- Local Tracked Files: ${files.length} files`,
+            `- Active Conflict Copies: ${conflicts.length}`,
+            ...conflicts.map(conflict => `  - \`${conflict.path}\``)
+        ]);
         return true;
     } catch (error: unknown) {
-        report.push(`- Local Vault Error: ${errorMessage(error)}`);
+        lines = lines.concat(`- Local Vault Error: ${errorMessage(error)}`);
         return false;
+    } finally {
+        report.push(...lines);
     }
 }
 
 async function appendGitHubStatus(settings: RayVaultSyncSettings, report: string[]): Promise<boolean> {
-    report.push('\n## GitHub Connectivity Status');
+    let lines = ['\n## GitHub Connectivity Status'];
     try {
         if (!settings.githubToken) throw new Error('GitHub token is empty. Please enter your PAT in settings.');
         if (!settings.repository) throw new Error('GitHub repository is empty. Please enter owner/repo in settings.');
 
         const client = new GitHubClient(settings.githubToken, settings.repository);
         const head = await client.getHeadCommit(settings.branch || 'main');
-        report.push('- Authentication: Valid');
-        report.push(`- Remote HEAD Commit: \`${head}\``);
         const tree = await client.getTree(head);
-        report.push(`- Remote Tree Listing: Accessible (${tree.length} files tracked)`);
+        lines = lines.concat([
+            '- Authentication: Valid',
+            `- Remote HEAD Commit: \`${head}\``,
+            `- Remote Tree Listing: Accessible (${tree.length} files tracked)`
+        ]);
         return true;
     } catch (error: unknown) {
-        report.push(`- GitHub Connection Error: ${errorMessage(error)}`);
+        lines = lines.concat(`- GitHub Connection Error: ${errorMessage(error)}`);
         return false;
+    } finally {
+        report.push(...lines);
     }
 }
 
@@ -53,7 +60,7 @@ async function appendPlanPreview(
     settings: RayVaultSyncSettings,
     report: string[]
 ): Promise<void> {
-    report.push('\n## Synchronization Plan Preview');
+    let lines = ['\n## Synchronization Plan Preview'];
     try {
         const engine = new SyncEngine(
             new LocalVault(app, settings.excludedPaths),
@@ -69,14 +76,18 @@ async function appendPlanPreview(
             DELETE_REMOTE: plan.filter(item => item.action === 'DELETE_REMOTE').length,
             CONFLICT: plan.filter(item => item.action === 'CONFLICT').length
         };
-        report.push(`- Files In Sync (NOOP): ${counts.NOOP}`);
-        report.push(`- Pending Uploads: ${counts.UPLOAD}`);
-        report.push(`- Pending Downloads: ${counts.DOWNLOAD}`);
-        report.push(`- Pending Local Deletions: ${counts.DELETE_LOCAL}`);
-        report.push(`- Pending Remote Deletions: ${counts.DELETE_REMOTE}`);
-        report.push(`- Potential Conflicts: ${counts.CONFLICT}`);
+        lines = lines.concat([
+            `- Files In Sync (NOOP): ${counts.NOOP}`,
+            `- Pending Uploads: ${counts.UPLOAD}`,
+            `- Pending Downloads: ${counts.DOWNLOAD}`,
+            `- Pending Local Deletions: ${counts.DELETE_LOCAL}`,
+            `- Pending Remote Deletions: ${counts.DELETE_REMOTE}`,
+            `- Potential Conflicts: ${counts.CONFLICT}`
+        ]);
     } catch (error: unknown) {
-        report.push(`- Reconciler Error: ${errorMessage(error)}`);
+        lines = lines.concat(`- Reconciler Error: ${errorMessage(error)}`);
+    } finally {
+        report.push(...lines);
     }
 }
 
