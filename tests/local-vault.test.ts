@@ -19,4 +19,31 @@ describe('LocalVault GitHub blob hashes', () => {
             isBinary: false
         });
     });
+
+    describe('LocalVault file writes', () => {
+        test('creates parent directories in order before writing a new file', async () => {
+            const operations: string[] = [];
+            const app = {
+                vault: {
+                    getAbstractFileByPath: () => null,
+                    adapter: {
+                        exists: async () => false,
+                        readBinary: async () => new ArrayBuffer(0),
+                        write: async (path: string) => operations.push(`write:${path}`)
+                    },
+                    createFolder: async (path: string) => operations.push(`folder:${path}`),
+                    create: async (path: string) => operations.push(`file:${path}`)
+                }
+            };
+            const vault = new LocalVault(app as never);
+
+            await vault.writeFile('one/two/note.md', 'content', false);
+
+            expect(operations).toEqual([
+                'folder:one',
+                'folder:one/two',
+                'file:one/two/note.md'
+            ]);
+        });
+    });
 });

@@ -130,10 +130,15 @@ export class LocalVault implements ILocalVault {
     private async ensureParentDirectories(path: string): Promise<void> {
         const parts = path.split('/');
         let currentPath = '';
+        const directories: string[] = [];
         for (const part of parts.slice(0, -1)) {
             currentPath += (currentPath ? '/' : '') + part;
-            await this.ensureParentDirectory(currentPath);
+            directories.push(currentPath);
         }
+        await directories.reduce(
+            (sequence, directory) => sequence.then(() => this.ensureParentDirectory(directory)),
+            Promise.resolve()
+        );
     }
 
     private async ensureParentDirectory(path: string): Promise<void> {
