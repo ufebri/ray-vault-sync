@@ -1,22 +1,29 @@
 # SonarCloud setup and quality gate
 
-The CI workflow runs SonarCloud after tests and the production build on pushes
-to `main` and pull requests from branches in this repository. It waits for the
-SonarCloud Quality Gate result; a failed gate or missing configuration fails
+The CI workflow is configured to run SonarCloud after tests and the production
+build on pushes to `main` and pull requests from branches in this repository.
+The first CI attempt found that SonarQube Cloud Automatic Analysis is enabled;
+CI analysis cannot run at the same time. Disable Automatic Analysis before
+expecting the `sonar` job to pass. Once configured, the workflow waits for the
+SonarCloud Quality Gate result; a failed gate or missing credentials fails
 the `sonar` job. Pull requests from forks skip the scan because GitHub does not
-provide repository secrets to untrusted fork workflows.
+provide repository secrets to untrusted fork workflows; review those changes
+on a trusted branch before merging.
 
 ## Repository configuration
 
-1. Import `ufebri/ray-vault-sync` into the SonarCloud organization and enable
-   pull request analysis for the GitHub repository.
-2. Add the SonarCloud analysis token as the GitHub Actions secret
+1. In SonarQube Cloud, open the project's **Administration → Analysis Method**
+   settings and turn **Automatic Analysis** off. CI analysis fails while both
+   analysis methods are enabled.
+2. Confirm the project is bound to the GitHub repository
+   `ufebri/ray-vault-sync` and pull request analysis is enabled.
+3. Add the SonarCloud analysis token as the GitHub Actions secret
    `SONAR_TOKEN`.
-3. Add repository variables or secrets `SONAR_ORGANIZATION` and
+4. Add repository variables or secrets `SONAR_ORGANIZATION` and
    `SONAR_PROJECT_KEY` using the exact values shown by the SonarCloud project.
-4. Require the `verify` and `sonar` checks on the default branch before merging
+5. Require the `verify` and `sonar` checks on the default branch before merging
    changes. Keep this requirement in place while the release freeze is active.
-5. Run CI for the default branch to establish the first analysis and inspect
+6. Run CI for the default branch to establish the first analysis and inspect
    the full project issue inventory as well as the Quality Gate.
 
 Never put the token in the repository, a workflow file, an issue, or a log.

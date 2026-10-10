@@ -27,5 +27,6 @@ PNPM is the sole package manager. Node 20 remains the CI and release runtime.
 ## Validation
 
 CI installs from the pinned lockfile, runs the Jest suite with an LCOV coverage
-report, and builds the plugin. The release workflow remains disabled until the
-`RELEASES_ENABLED` repository variable is explicitly set to `true`.
+report, and builds the plugin. Publishing is blocked until the
+`RELEASES_ENABLED` repository variable is explicitly set to `true`; tag pushes
+during the freeze intentionally fail instead of producing a release.

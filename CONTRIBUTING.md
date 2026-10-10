@@ -32,9 +32,9 @@ Please be respectful, constructive, and friendly when interacting with fellow co
    pnpm test
    ```
 
-Pull requests run tests with coverage, build the plugin, and run SonarCloud analysis. Maintainers must configure the `SONAR_TOKEN` Actions secret and provide `SONAR_ORGANIZATION` and `SONAR_PROJECT_KEY` as repository variables or secrets. The SonarCloud job fails clearly if this configuration is missing. Fork pull requests run the normal checks but skip SonarCloud because GitHub does not provide repository secrets to untrusted fork workflows; maintainers must verify those changes in a trusted branch before merge. See [SonarCloud setup](docs/SONARCLOUD.md) for onboarding, required branch checks, and finding-resolution policy.
+Pull requests run tests with coverage, build the plugin, and run SonarCloud analysis after automatic analysis is disabled for the project. Maintainers must configure the `SONAR_TOKEN` Actions secret and provide `SONAR_ORGANIZATION` and `SONAR_PROJECT_KEY` as repository variables or secrets. The SonarCloud job fails clearly if this configuration is missing. Fork pull requests skip SonarCloud because GitHub does not provide repository secrets to untrusted fork workflows; that is an explicit exception, so review fork changes on a trusted branch before merging. See [SonarCloud setup](docs/SONARCLOUD.md) for onboarding, required branch checks, and finding-resolution policy.
 
-The release workflow is disabled unless the `RELEASES_ENABLED` repository variable is explicitly set to `true`. Do not create release tags while releases are frozen.
+The release workflow blocks publishing unless the `RELEASES_ENABLED` repository variable is explicitly set to `true`; a matching tag while frozen deliberately produces a failed workflow. Do not create release tags during the freeze.
 
 ## Local Testing with Obsidian
 
