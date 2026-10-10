@@ -176,13 +176,15 @@ export class SyncEngine {
             const BATCH_SIZE = 500;
             let currentTreeSha = remoteHead;
             const totalBatches = Math.ceil(treeChanges.length / BATCH_SIZE);
-
-            for (let i = 0; i < treeChanges.length; i += BATCH_SIZE) {
-                const batch = treeChanges.slice(i, i + BATCH_SIZE);
-                const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-                onProgress?.(`Uploading batch ${batchNum}/${totalBatches} (${batch.length} files)...`);
-                currentTreeSha = await this.remote.createTree(currentTreeSha, batch);
-            }
+            const batches = Array.from(
+                { length: totalBatches },
+                (_, index) => treeChanges.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE)
+            );
+            currentTreeSha = await batches.reduce(async (sequence, batch, index) => {
+                const baseTreeSha = await sequence;
+                onProgress?.(`Uploading batch ${index + 1}/${totalBatches} (${batch.length} files)...`);
+                return this.remote.createTree(baseTreeSha, batch);
+            }, Promise.resolve(currentTreeSha));
 
             onProgress?.('Creating commit...');
             const date = new Date().toISOString();

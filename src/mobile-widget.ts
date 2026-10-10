@@ -120,7 +120,7 @@ export class MobileSyncWidget {
         if (this.statusTextEl) {
             const shortError = errorMsg && errorMsg.toLowerCase().includes('rate limit') ? 'Rate limit' : 'Sync Error';
             this.statusTextEl.setText(shortError);
-            if (errorMsg) this.statusTextEl?.setAttribute('title', errorMsg);
+            if (errorMsg) this.statusTextEl.setAttribute('title', errorMsg);
         }
     }
 
