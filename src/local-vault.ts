@@ -3,7 +3,7 @@ import { ILocalVault, LocalFile, SyncState } from './interfaces';
 import { isIgnoredPath } from './sync-core';
 
 export class LocalVault implements ILocalVault {
-    private customExcludes: string[] = [];
+    private readonly customExcludes: string[] = [];
 
     private get syncStatePath() {
         return `${this.app.vault.configDir}/plugins/ray-vault-sync/sync-state.json`;
@@ -12,7 +12,7 @@ export class LocalVault implements ILocalVault {
         return `${this.app.vault.configDir}/plugins/raylabs-vault-sync/sync-state.json`;
     }
 
-    constructor(private app: App, customExcludes?: string | string[]) {
+    constructor(private readonly app: App, customExcludes?: string | string[]) {
         if (typeof customExcludes === 'string') {
             this.customExcludes = customExcludes
                 .split(',')
@@ -104,6 +104,22 @@ export class LocalVault implements ILocalVault {
     }
 
     public async writeFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void> {
+        await this.ensureParentDirectories(path);
+        const file = this.app.vault.getAbstractFileByPath(path);
+        const existsOnDisk = await this.app.vault.adapter.exists(path);
+
+        if (file instanceof TFile) {
+            await this.modifyFile(file, content, isBinary);
+            return;
+        }
+        if (existsOnDisk) {
+            await this.writeAdapterFile(path, content, isBinary);
+            return;
+        }
+        await this.createFile(path, content, isBinary);
+    }
+
+    private async ensureParentDirectories(path: string): Promise<void> {
         const parts = path.split('/');
         let currentPath = '';
         for (let i = 0; i < parts.length - 1; i++) {
@@ -120,41 +136,35 @@ export class LocalVault implements ILocalVault {
                 }
             }
         }
+    }
 
-        const file = this.app.vault.getAbstractFileByPath(path);
-        const existsOnDisk = await this.app.vault.adapter.exists(path);
-        
-        if (file instanceof TFile) {
-            if (isBinary) {
-                await this.app.vault.modifyBinary(file, (content as Uint8Array).buffer);
-            } else {
-                await this.app.vault.modify(file, content as string);
-            }
-        } else if (existsOnDisk) {
-            if (isBinary) {
-                await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
-            } else {
-                await this.app.vault.adapter.write(path, content as string);
-            }
+    private async modifyFile(file: TFile, content: string | Uint8Array, isBinary: boolean): Promise<void> {
+        if (isBinary) {
+            await this.app.vault.modifyBinary(file, (content as Uint8Array).buffer);
         } else {
-            try {
-                if (isBinary) {
-                    await this.app.vault.createBinary(path, (content as Uint8Array).buffer);
-                } else {
-                    await this.app.vault.create(path, content as string);
-                }
-            } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                if (errMsg.includes('File already exists')) {
-                    if (isBinary) {
-                        await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
-                    } else {
-                        await this.app.vault.adapter.write(path, content as string);
-                    }
-                } else {
-                    throw e;
-                }
+            await this.app.vault.modify(file, content as string);
+        }
+    }
+
+    private async writeAdapterFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void> {
+        if (isBinary) {
+            await this.app.vault.adapter.writeBinary(path, content as Uint8Array);
+        } else {
+            await this.app.vault.adapter.write(path, content as string);
+        }
+    }
+
+    private async createFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void> {
+        try {
+            if (isBinary) {
+                await this.app.vault.createBinary(path, (content as Uint8Array).buffer);
+            } else {
+                await this.app.vault.create(path, content as string);
             }
+        } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            if (!errMsg.includes('File already exists')) throw e;
+            await this.writeAdapterFile(path, content, isBinary);
         }
     }
 
@@ -203,8 +213,8 @@ export class LocalVault implements ILocalVault {
         
         const parts = dir.split('/');
         let currentPath = '';
-        for (let i = 0; i < parts.length; i++) {
-            currentPath += (currentPath ? '/' : '') + parts[i];
+        for (const part of parts) {
+            currentPath += (currentPath ? '/' : '') + part;
             if (!(await this.app.vault.adapter.exists(currentPath))) {
                 await this.app.vault.adapter.mkdir(currentPath);
             }

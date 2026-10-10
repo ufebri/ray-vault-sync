@@ -2,6 +2,8 @@ export function setIcon(el: HTMLElement, iconId: string): void {
     // mock setIcon
 }
 
+export class TFile {}
+
 export class Notice {
     constructor(public message: string) {}
 }
