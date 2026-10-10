@@ -13,24 +13,28 @@ Please be respectful, constructive, and friendly when interacting with fellow co
    cd ray-vault-sync
    ```
 
-2. **Install dependencies**:
+2. **Install dependencies** (Node.js 20 and pnpm 12.9.1):
    ```bash
-   npm install
+   pnpm install --frozen-lockfile
    ```
 
 3. **Build the plugin**:
    ```bash
    # Development watch mode
-   npm run dev
+   pnpm run dev
 
    # Production build
-   npm run build
+   pnpm run build
    ```
 
 4. **Run Automated Tests**:
    ```bash
-   npm test
+   pnpm test
    ```
+
+Pull requests run tests with coverage and build the plugin. SonarQube Cloud's GitHub Automatic Analysis separately scans pull requests and reports its `SonarCloud Code Analysis` quality-gate check. Keep Automatic Analysis enabled; do not also run a CI scanner because SonarCloud rejects simultaneous analyses. See [SonarCloud setup](docs/SONARCLOUD.md) for the required project binding and branch checks.
+
+The release workflow blocks publishing unless the `RELEASES_ENABLED` repository variable is explicitly set to `true`; a matching tag while frozen deliberately produces a failed workflow. Do not create release tags during the freeze.
 
 ## Local Testing with Obsidian
 

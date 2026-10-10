@@ -3,6 +3,7 @@
   "version": "1.3.0",
   "description": "Easy, free, cross-device GitHub sync for your vault with 3-way merge and zero silent data loss. Works seamlessly across Desktop and Mobile.",
   "main": "main.js",
+  "packageManager": "pnpm@12.9.1",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
