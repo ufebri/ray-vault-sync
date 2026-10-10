@@ -25,6 +25,9 @@ describe('ErrorLogManager (local crash log)', () => {
         const token = 'mytoken1234';
         expect(redactText(`failed with ${token}`, [token])).toBe('failed with [REDACTED]');
         expect(redactText('key github_pat_abcXYZ_123 here', [])).toBe('key [REDACTED] here');
+        const bearer = ['Bear', 'er ', 'abc-def_01'].join('');
+        const redactedBearer = ['Bearer ', '[REDACTED]'].join('');
+        expect(redactText(bearer, [])).toBe(redactedBearer);
         expect(redactText('Authorization: Bearer abc.def-ghi', [])).toContain('Bearer [REDACTED]');
     });
 
@@ -33,7 +36,7 @@ describe('ErrorLogManager (local crash log)', () => {
         const mgr = new ErrorLogManager(app as never, () => [], '1.2.0', 'desktop');
         await mgr.log('runSync', new Error('boom'));
         const recent = await mgr.getRecent(5);
-        expect(recent.length).toBe(1);
+        expect(recent).toHaveLength(1);
         expect(recent[0].source).toBe('runSync');
         expect(recent[0].message).toBe('boom');
         const text = await mgr.formatRecent(5);
@@ -47,7 +50,7 @@ describe('ErrorLogManager (local crash log)', () => {
             await mgr.log('src', new Error(`err-${i} secret-token`));
         }
         const recent = await mgr.getRecent(100);
-        expect(recent.length).toBe(50);
+        expect(recent).toHaveLength(50);
         expect(recent[0].message).toContain('err-59');
         expect(recent[0].message).not.toContain('secret-token');
     });

@@ -2,7 +2,7 @@ import { setIcon } from 'obsidian';
 import type RayVaultSyncPlugin from './main';
 
 export class MobileSyncWidget {
-    private plugin: RayVaultSyncPlugin;
+    private readonly plugin: RayVaultSyncPlugin;
     private containerEl: HTMLElement | null = null;
     private buttonEl: HTMLButtonElement | null = null;
     private iconEl: HTMLElement | null = null;
@@ -79,7 +79,7 @@ export class MobileSyncWidget {
 
         // Insert before .nav-files-container or at the beginning of the view
         const navFiles = viewEl.querySelector('.nav-files-container');
-        if (navFiles && navFiles.parentElement) {
+        if (navFiles?.parentElement) {
             navFiles.parentElement.insertBefore(this.containerEl, navFiles);
         } else {
             viewEl.prepend(this.containerEl);
@@ -120,7 +120,7 @@ export class MobileSyncWidget {
         if (this.statusTextEl) {
             const shortError = errorMsg && errorMsg.toLowerCase().includes('rate limit') ? 'Rate limit' : 'Sync Error';
             this.statusTextEl.setText(shortError);
-            if (errorMsg) this.statusTextEl.setAttribute('title', errorMsg);
+            if (errorMsg) this.statusTextEl?.setAttribute('title', errorMsg);
         }
     }
 
