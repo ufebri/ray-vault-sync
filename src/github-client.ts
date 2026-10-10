@@ -1,15 +1,50 @@
-import { requestUrl, RequestUrlParam } from 'obsidian';
+import { requestUrl, RequestUrlParam, RequestUrlResponse } from 'obsidian';
 import { IGitHubClient, RemoteFile, GitTreeItem } from './interfaces';
 
 
 export class GitHubClient implements IGitHubClient {
-    private baseUrl = 'https://api.github.com';
+    private readonly baseUrl = 'https://api.github.com';
 
     constructor(
-        private token: string,
-        private repo: string // e.g. "owner/repo"
+        private readonly token: string,
+        private readonly repo: string // e.g. "owner/repo"
     ) {}
     private lastMutativeRequestTime = 0;
+
+    private getRateLimitWaitSeconds(headers: Record<string, string>): number {
+        const resetHeader = headers['x-ratelimit-reset'];
+        const retryAfter = headers['retry-after'];
+        if (retryAfter) return Number.parseInt(retryAfter, 10);
+        if (resetHeader) {
+            return Math.max(0, Number.parseInt(resetHeader, 10) - Math.floor(Date.now() / 1000));
+        }
+        return 3600;
+    }
+
+    private getApiErrorMessage(response: RequestUrlResponse, waitSeconds: number): string {
+        let errorMsg = `GitHub API Error: ${response.status}`;
+        try {
+            const errorData = response.json as { message?: string };
+            if (errorData?.message) {
+                if (errorData.message.includes('Resource not accessible by personal access token')) {
+                    errorMsg = 'GitHub Token lacks "Contents: Read & write" permission for this repo.';
+                } else if (errorData.message.includes('rate limit exceeded') || response.status === 403 || response.status === 429) {
+                    errorMsg = `GitHub API Rate Limit exceeded. Will reset in ${waitSeconds}s.`;
+                } else if (errorData.message.includes('Bad credentials')) {
+                    errorMsg = 'Invalid GitHub Token (Expired or revoked).';
+                } else if (errorData.message.includes('Not Found')) {
+                    errorMsg = 'Repository not found. Check the repo name and token permissions.';
+                } else {
+                    errorMsg = `GitHub Error: ${errorData.message}`;
+                }
+            }
+        } catch {
+            if (response.status === 403 || response.status === 429) {
+                errorMsg = `GitHub API Rate Limit exceeded. Will reset in ${waitSeconds}s.`;
+            }
+        }
+        return errorMsg;
+    }
 
     private async request<T = unknown>(endpoint: string, method: string = 'GET', body?: unknown): Promise<T> {
         // Anti-abuse: Ensure at least 1 second between mutative requests (GitHub Best Practices)
@@ -35,40 +70,8 @@ export class GitHubClient implements IGitHubClient {
         const response = await requestUrl(req);
 
         if (response.status >= 400) {
-            let errorMsg = `GitHub API Error: ${response.status}`;
-            
-            // Check for rate limit headers
-            const resetHeader = response.headers['x-ratelimit-reset'];
-            const retryAfter = response.headers['retry-after'];
-            let waitSeconds = 3600; // default 1 hour
-            
-            if (retryAfter) {
-                waitSeconds = parseInt(retryAfter);
-            } else if (resetHeader) {
-                waitSeconds = Math.max(0, parseInt(resetHeader) - Math.floor(Date.now() / 1000));
-            }
-
-            try {
-                const errorData = response.json as { message?: string };
-                if (errorData && errorData.message) {
-                    if (errorData.message.includes('Resource not accessible by personal access token')) {
-                        errorMsg = 'GitHub Token lacks "Contents: Read & write" permission for this repo.';
-                    } else if (errorData.message.includes('rate limit exceeded') || response.status === 403 || response.status === 429) {
-                        errorMsg = `GitHub API Rate Limit exceeded. Will reset in ${waitSeconds}s.`;
-                    } else if (errorData.message.includes('Bad credentials')) {
-                        errorMsg = 'Invalid GitHub Token (Expired or revoked).';
-                    } else if (errorData.message.includes('Not Found')) {
-                        errorMsg = 'Repository not found. Check the repo name and token permissions.';
-                    } else {
-                        errorMsg = `GitHub Error: ${errorData.message}`;
-                    }
-                }
-            } catch {
-                if (response.status === 403 || response.status === 429) {
-                    errorMsg = `GitHub API Rate Limit exceeded. Will reset in ${waitSeconds}s.`;
-                }
-            }
-            throw new Error(errorMsg);
+            const waitSeconds = this.getRateLimitWaitSeconds(response.headers);
+            throw new Error(this.getApiErrorMessage(response, waitSeconds));
         }
         if (method !== 'GET') {
             this.lastMutativeRequestTime = Date.now();
@@ -100,7 +103,7 @@ export class GitHubClient implements IGitHubClient {
         const binaryStr = atob(base64Content);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
+            bytes[i] = binaryStr.codePointAt(i)!;
         }
 
         if (isBinary) {
@@ -135,31 +138,16 @@ export class GitHubClient implements IGitHubClient {
     }
 
     public async createBlob(content: string | Uint8Array, isBinary: boolean): Promise<string> {
-        let encoding = 'utf-8';
-        let encodedContent = content as string;
-
-        if (isBinary) {
-            encoding = 'base64';
-            const arr = content as Uint8Array;
-            let binaryStr = '';
-            for (let i = 0; i < arr.byteLength; i++) {
-                binaryStr += String.fromCharCode(arr[i]);
-            }
-            encodedContent = btoa(binaryStr);
-        } else {
-            encoding = 'base64';
-            const encoder = new TextEncoder();
-            const bytes = encoder.encode(content as string);
-            let binaryStr = '';
-            for (let i = 0; i < bytes.length; i++) {
-                binaryStr += String.fromCharCode(bytes[i]);
-            }
-            encodedContent = btoa(binaryStr);
+        const bytes = isBinary ? content as Uint8Array : new TextEncoder().encode(content as string);
+        let binaryStr = '';
+        for (const byte of bytes) {
+            binaryStr += String.fromCodePoint(byte);
         }
+        const encodedContent = btoa(binaryStr);
 
         const data = await this.request<{ sha: string }>('/git/blobs', 'POST', {
             content: encodedContent,
-            encoding
+            encoding: 'base64'
         });
         return data.sha;
     }
