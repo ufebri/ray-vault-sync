@@ -32,7 +32,7 @@ Please be respectful, constructive, and friendly when interacting with fellow co
    pnpm test
    ```
 
-Pull requests run tests with coverage, build the plugin, and run SonarCloud analysis after automatic analysis is disabled for the project. Maintainers must configure the `SONAR_TOKEN` Actions secret and provide `SONAR_ORGANIZATION` and `SONAR_PROJECT_KEY` as repository variables or secrets. The SonarCloud job fails clearly if this configuration is missing. Fork pull requests skip SonarCloud because GitHub does not provide repository secrets to untrusted fork workflows; that is an explicit exception, so review fork changes on a trusted branch before merging. See [SonarCloud setup](docs/SONARCLOUD.md) for onboarding, required branch checks, and finding-resolution policy.
+Pull requests run tests with coverage and build the plugin. SonarQube Cloud's GitHub Automatic Analysis separately scans pull requests and reports its `SonarCloud Code Analysis` quality-gate check. Keep Automatic Analysis enabled; do not also run a CI scanner because SonarCloud rejects simultaneous analyses. See [SonarCloud setup](docs/SONARCLOUD.md) for the required project binding and branch checks.
 
 The release workflow blocks publishing unless the `RELEASES_ENABLED` repository variable is explicitly set to `true`; a matching tag while frozen deliberately produces a failed workflow. Do not create release tags during the freeze.
 
