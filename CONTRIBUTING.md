@@ -54,6 +54,7 @@ The release workflow blocks publishing unless the `RELEASES_ENABLED` repository 
   - Use `window.setTimeout()` and `window.setInterval()` for popout window compatibility.
   - Use `app.fileManager.trashFile()` for user-configured trash handling.
 - **No Silent Data Loss**: Any change to conflict reconciliation logic must preserve user content under all circumstances. Never force-overwrite a remote or local change without preservation.
+- **No AI Agent / Bot Co-Authorship**: Never add `Co-authored-by:` trailers, bot tags, or AI agent attribution to git commit messages or PR descriptions to ensure agents and bots are not registered as repository contributors.
 - **Secondary Rate-Limit Safety**: Always throttle mutative GitHub API requests (`POST`, `PATCH`, `PUT`, `DELETE`) with at least 1-second delays.
 - **Strict Semantic Versioning (SemVer 2.0.0)**:
   - Do NOT bump versions during local development or debugging. Keep version frozen during iterations.
