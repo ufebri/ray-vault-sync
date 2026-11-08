@@ -8,7 +8,10 @@ import { ErrorLogManager } from '../src/error-log';
 jest.mock('../src/local-vault');
 jest.mock('../src/github-client');
 jest.mock('../src/sync-core');
-jest.mock('../src/error-log');
+jest.mock('../src/error-log', () => ({
+    ...jest.requireActual('../src/error-log'),
+    ErrorLogManager: jest.fn()
+}));
 
 const localVaultMock = jest.mocked(LocalVault);
 const githubClientMock = jest.mocked(GitHubClient);
@@ -82,8 +85,9 @@ describe('runDiagnostics', () => {
         await runDiagnostics(app as never, settings as never);
 
         expect(reportContent).toContain('Repository: `owner/repository`');
-        expect(reportContent).toContain('Token: `ghp_...oken`');
+        expect(reportContent).toContain('Token: Configured (redacted)');
         expect(reportContent).not.toContain(settings.githubToken);
+        expect(reportContent).toContain('Sync Freshness: Stale');
         expect(reportContent).toContain('Active Conflict Copies: 1');
         expect(reportContent).toContain('Remote Tree Listing: Accessible (1 files tracked)');
         expect(reportContent).toContain('Potential Conflicts: 1');

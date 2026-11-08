@@ -5,6 +5,19 @@ All notable changes to **Ray Vault Sync** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-09
+
+### Added
+- Sync freshness and stale-state reporting across status, diagnostics, and the mobile widget.
+- Safe synchronization for the three allowlisted Thousand Sunny hidden JSON files.
+
+### Fixed
+- Preflight invalid paths before sync mutations and reuse deterministic conflict snapshots after retries.
+- Pause automatic sync after safety stops or repeated transient failures.
+
+### Security
+- Move CI and release workflows to Node 24.22.1 and update vulnerable build/test dependencies.
+
 ## [1.3.0] - 2026-09-30
 
 ### Added

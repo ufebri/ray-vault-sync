@@ -1,5 +1,20 @@
 import { setIcon } from 'obsidian';
 import type RayVaultSyncPlugin from './main';
+import type { RayVaultSyncSettings } from './settings';
+
+export type SyncFreshness = 'off' | 'syncing' | 'fresh' | 'stale' | 'error';
+
+export function getSyncFreshness(
+    settings: Pick<RayVaultSyncSettings, 'autoSyncEnabled' | 'autoSyncInterval' | 'lastSyncTimestamp' | 'lastSyncStatus' | 'autoSyncPausedReason'>,
+    now = Date.now()
+): SyncFreshness {
+    if (settings.lastSyncStatus === 'syncing') return 'syncing';
+    if (settings.autoSyncPausedReason || settings.lastSyncStatus === 'error') return 'error';
+    if (!settings.autoSyncEnabled) return 'off';
+    if (!settings.lastSyncTimestamp) return 'stale';
+    const staleAfter = Math.max(settings.autoSyncInterval * 3 * 60_000, 15 * 60_000);
+    return now - settings.lastSyncTimestamp > staleAfter ? 'stale' : 'fresh';
+}
 
 export class MobileSyncWidget {
     private readonly plugin: RayVaultSyncPlugin;
@@ -69,7 +84,7 @@ export class MobileSyncWidget {
         const infoBox = this.containerEl.createDiv({ cls: 'ray-vault-sync-info-box' });
 
         const statusRow = infoBox.createDiv({ cls: 'ray-vault-sync-status-row' });
-        this.statusDotEl = statusRow.createSpan({ cls: 'ray-vault-sync-status-dot idle' });
+        this.statusDotEl = statusRow.createSpan({ cls: 'ray-vault-sync-status-dot off' });
         this.statusTextEl = statusRow.createSpan({ cls: 'ray-vault-sync-status-text', text: 'Idle' });
 
         this.timeTextEl = infoBox.createDiv({
@@ -95,6 +110,7 @@ export class MobileSyncWidget {
             this.statusDotEl.className = 'ray-vault-sync-status-dot syncing';
         }
         if (this.statusTextEl) this.statusTextEl.setText('Syncing...');
+        this.updateTimeDisplay();
     }
 
     public setSuccess(timestamp: number): void {
@@ -103,7 +119,7 @@ export class MobileSyncWidget {
         if (this.iconEl) this.iconEl.removeClass('is-syncing');
         if (this.btnLabelEl) this.btnLabelEl.setText('Sync Now');
         if (this.statusDotEl) {
-            this.statusDotEl.className = 'ray-vault-sync-status-dot success';
+            this.statusDotEl.className = 'ray-vault-sync-status-dot fresh';
         }
         if (this.statusTextEl) this.statusTextEl.setText('Synced');
         this.updateTimeDisplay(timestamp);
@@ -120,23 +136,28 @@ export class MobileSyncWidget {
         const shortError = errorMsg?.toLowerCase().includes('rate limit') ? 'Rate limit' : 'Sync Error';
         this.statusTextEl?.setText(shortError);
         if (errorMsg) this.statusTextEl?.setAttribute('title', errorMsg);
+        this.updateTimeDisplay();
     }
 
     public updateState(): void {
         if (!this.containerEl) return;
-        const status = this.plugin.settings.lastSyncStatus || 'idle';
-        if (status === 'syncing') {
+        const freshness = getSyncFreshness(this.plugin.settings);
+        if (freshness === 'syncing') {
             this.setSyncing();
-        } else if (status === 'success') {
-            this.setSuccess(this.plugin.settings.lastSyncTimestamp || Date.now());
-        } else if (status === 'error') {
+        } else if (freshness === 'error') {
             this.setError(this.plugin.settings.lastSyncMessage);
         } else {
             if (this.buttonEl) this.buttonEl.disabled = false;
             if (this.iconEl) this.iconEl.removeClass('is-syncing');
             if (this.btnLabelEl) this.btnLabelEl.setText('Sync Now');
-            if (this.statusDotEl) this.statusDotEl.className = 'ray-vault-sync-status-dot idle';
-            if (this.statusTextEl) this.statusTextEl.setText('Idle');
+            if (this.statusDotEl) this.statusDotEl.className = `ray-vault-sync-status-dot ${freshness}`;
+            const labels: Record<Exclude<SyncFreshness, 'syncing' | 'error'>, string> = {
+                off: 'Auto-sync off',
+                fresh: `Up to date · every ${this.plugin.settings.autoSyncInterval}m`,
+                stale: 'Sync overdue'
+            };
+            if (this.statusTextEl) this.statusTextEl.setText(labels[freshness]);
+            this.statusTextEl?.removeAttribute('title');
             this.updateTimeDisplay(this.plugin.settings.lastSyncTimestamp);
         }
     }
@@ -154,7 +175,7 @@ export class MobileSyncWidget {
     private startRelativeTimeTimer(): void {
         if (this.timerId !== null) return;
         this.timerId = window.setInterval(() => {
-            this.updateTimeDisplay();
+            this.updateState();
         }, 30_000);
     }
 

@@ -89,8 +89,12 @@
     transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.ray-vault-sync-status-dot.idle {
+.ray-vault-sync-status-dot.off {
     background-color: var(--text-muted);
+}
+
+.ray-vault-sync-status-dot.stale {
+    background-color: var(--color-orange, #f59e0b);
 }
 
 .ray-vault-sync-status-dot.syncing {
@@ -98,7 +102,7 @@
     box-shadow: 0 0 6px var(--interactive-accent, #3b82f6);
 }
 
-.ray-vault-sync-status-dot.success {
+.ray-vault-sync-status-dot.fresh {
     background-color: var(--color-green, #10b981);
 }
 

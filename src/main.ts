@@ -1,17 +1,18 @@
 import { Plugin, Notice, Platform } from 'obsidian';
 import { RayVaultSyncSettings, DEFAULT_SETTINGS, RayVaultSyncSettingTab } from './settings';
-import { SyncEngine } from './sync-core';
+import { SyncEngine, SyncSafetyError } from './sync-core';
 import { LocalVault } from './local-vault';
 import { GitHubClient } from './github-client';
 import { runDiagnostics } from './diagnostics';
-import { MobileSyncWidget } from './mobile-widget';
-import { ErrorLogManager } from './error-log';
+import { getSyncFreshness, formatRelativeTime, MobileSyncWidget } from './mobile-widget';
+import { ErrorLogManager, redactText } from './error-log';
 
 export default class RayVaultSyncPlugin extends Plugin {
     settings!: RayVaultSyncSettings;
     statusBarItemEl!: HTMLElement;
 
     private autoSyncIntervalId: number | null = null;
+    private statusRefreshIntervalId: number | null = null;
     private isSyncing = false;
     private rateLimitResetTime = 0;
     private mobileWidget: MobileSyncWidget | null = null;
@@ -41,6 +42,9 @@ export default class RayVaultSyncPlugin extends Plugin {
         // Add status bar item (Desktop)
         this.statusBarItemEl = this.addStatusBarItem();
         this.statusBarItemEl.setText('Ray Sync: Idle');
+        this.statusRefreshIntervalId = window.setInterval(() => this.refreshStatusSurfaces(), 30_000);
+        this.registerInterval(this.statusRefreshIntervalId);
+        this.refreshStatusSurfaces();
 
         // Add left ribbon icon
         const ribbonIconEl = this.addRibbonIcon('sync', 'Ray Vault Sync', () => {
@@ -62,7 +66,15 @@ export default class RayVaultSyncPlugin extends Plugin {
             id: 'show-status',
             name: 'Show Sync Status',
             callback: () => {
-                new Notice(`Ray Vault Sync is Idle. Target: ${this.settings.repository || 'No repo set'}`);
+                void this.showSyncStatus();
+            }
+        });
+
+        this.addCommand({
+            id: 'resume-auto-sync',
+            name: 'Resume Auto-Sync',
+            callback: () => {
+                void this.resumeAutoSync();
             }
         });
 
@@ -93,6 +105,9 @@ export default class RayVaultSyncPlugin extends Plugin {
         if (this.autoSyncIntervalId !== null) {
             window.clearInterval(this.autoSyncIntervalId);
         }
+        if (this.statusRefreshIntervalId !== null) {
+            window.clearInterval(this.statusRefreshIntervalId);
+        }
         if (this.mobileWidget) {
             this.mobileWidget.destroy();
             this.mobileWidget = null;
@@ -111,29 +126,34 @@ export default class RayVaultSyncPlugin extends Plugin {
         return this.errorLog;
     }
 
-    setupAutoSync() {
-        if (this.autoSyncIntervalId !== null) {
-            window.clearInterval(this.autoSyncIntervalId);
-            this.autoSyncIntervalId = null;
-        }
+    setupAutoSync(runImmediately = true) {
+        this.clearAutoSyncTimer();
 
-        if (this.settings.autoSyncEnabled && this.settings.autoSyncInterval > 0) {
+        if (this.settings.autoSyncEnabled && this.settings.autoSyncInterval > 0 && !this.settings.autoSyncPausedReason) {
             const intervalMs = this.settings.autoSyncInterval * 60 * 1000;
             this.autoSyncIntervalId = window.setInterval(() => {
                 void this.runSync(true);
             }, intervalMs);
 
             this.registerInterval(this.autoSyncIntervalId);
-            
-            // Initial sync after 5 seconds
-            window.setTimeout(() => {
-                void this.runSync(true);
-            }, 5000);
+
+            if (runImmediately && (!this.settings.autoSyncRetryAfter || Date.now() >= this.settings.autoSyncRetryAfter)) {
+                window.setTimeout(() => {
+                    void this.runSync(true);
+                }, 5000);
+            }
         }
+        this.refreshStatusSurfaces();
     }
 
     async loadSettings() {
         this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<RayVaultSyncSettings>) };
+        if (this.settings.lastSyncMessage) {
+            this.settings.lastSyncMessage = redactText(this.settings.lastSyncMessage, [this.settings.githubToken]);
+        }
+        if (this.settings.autoSyncPausedReason) {
+            this.settings.autoSyncPausedReason = redactText(this.settings.autoSyncPausedReason, [this.settings.githubToken]);
+        }
     }
 
     async saveSettings() {
@@ -152,6 +172,10 @@ export default class RayVaultSyncPlugin extends Plugin {
             }
             return false;
         }
+        if (isAuto && (this.settings.autoSyncPausedReason ||
+            (this.settings.autoSyncRetryAfter !== undefined && Date.now() < this.settings.autoSyncRetryAfter))) {
+            return false;
+        }
         if (!this.settings.githubToken) {
             if (!isAuto) new Notice('Ray Vault Sync: GitHub PAT not configured.');
             return false;
@@ -163,13 +187,100 @@ export default class RayVaultSyncPlugin extends Plugin {
         return true;
     }
 
+    private clearAutoSyncTimer(): void {
+        if (this.autoSyncIntervalId !== null) {
+            window.clearInterval(this.autoSyncIntervalId);
+            this.autoSyncIntervalId = null;
+        }
+    }
+
+    private refreshStatusSurfaces(): void {
+        if (this.statusBarItemEl) {
+            const labels = {
+                off: 'Auto-sync off',
+                syncing: 'Syncing...',
+                fresh: 'Up to date',
+                stale: 'Sync overdue',
+                error: 'Error'
+            };
+            const freshness = getSyncFreshness(this.settings);
+            const lastSync = this.settings.lastSyncTimestamp
+                ? ` · ${formatRelativeTime(this.settings.lastSyncTimestamp)}`
+                : '';
+            this.statusBarItemEl.setText(`Ray Sync: ${labels[freshness]}${lastSync}`);
+        }
+        this.mobileWidget?.updateState();
+    }
+
+    private async showSyncStatus(): Promise<void> {
+        let savedCommit = 'Unavailable';
+        try {
+            const state = await new LocalVault(this.app, this.settings.excludedPaths).getSyncState();
+            savedCommit = state?.lastSyncedCommit || 'None';
+        } catch {
+            savedCommit = 'Could not read local sync state';
+        }
+        const freshnessLabels = {
+            off: 'Auto-sync off',
+            syncing: 'Syncing',
+            fresh: 'Fresh',
+            stale: 'Stale — last successful sync is outside the freshness window',
+            error: 'Error'
+        };
+        const timestamp = this.settings.lastSyncTimestamp;
+        const lastSuccess = timestamp
+            ? `${formatRelativeTime(timestamp)} (${new Date(timestamp).toLocaleString()})`
+            : 'Never';
+        const lines = [
+            `Target: ${this.settings.repository || 'No repository set'} / ${this.settings.branch || 'main'}`,
+            `Auto-sync: ${this.settings.autoSyncEnabled ? `Enabled (every ${this.settings.autoSyncInterval} minutes)` : 'Off — remote changes will not arrive automatically'}`,
+            `State: ${freshnessLabels[getSyncFreshness(this.settings)]}`,
+            `Last successful sync: ${lastSuccess}`,
+            `Saved commit: ${savedCommit}`
+        ];
+        if (this.settings.lastSyncMessage) lines.push(`Latest error: ${redactText(this.settings.lastSyncMessage, [this.settings.githubToken])}`);
+        if (this.settings.autoSyncPausedReason) lines.push(this.settings.autoSyncPausedReason);
+        new Notice(`Ray Vault Sync\n${lines.join('\n')}`, 10_000);
+    }
+
+    private async resumeAutoSync(): Promise<void> {
+        if (!this.settings.autoSyncEnabled) {
+            new Notice('Ray Vault Sync: Enable Auto-Sync in settings before resuming it.');
+            return;
+        }
+        this.settings.autoSyncPausedReason = undefined;
+        this.settings.autoSyncFailureCount = 0;
+        this.settings.autoSyncRetryAfter = undefined;
+        await this.saveSettings();
+        this.setupAutoSync();
+        new Notice('Ray Vault Sync: Auto-Sync resumed.');
+    }
+
     private async handleSyncError(error: unknown, isAuto: boolean): Promise<void> {
         const msg = error instanceof Error ? error.message : String(error);
+        const safeMsg = redactText(msg, [this.settings.githubToken]);
         void this.errorLog.log('runSync', error);
         this.settings.lastSyncStatus = 'error';
-        this.settings.lastSyncMessage = msg;
+        this.settings.lastSyncMessage = safeMsg;
+
+        if (error instanceof SyncSafetyError) {
+            this.settings.autoSyncPausedReason = `Auto-Sync paused after a safety stop: ${safeMsg}`;
+            this.settings.autoSyncRetryAfter = undefined;
+            this.clearAutoSyncTimer();
+        } else if (isAuto) {
+            const failures = (this.settings.autoSyncFailureCount ?? 0) + 1;
+            this.settings.autoSyncFailureCount = failures;
+            if (failures >= 3) {
+                this.settings.autoSyncPausedReason = `Auto-Sync paused after ${failures} consecutive automatic failures: ${safeMsg}`;
+                this.settings.autoSyncRetryAfter = undefined;
+                this.clearAutoSyncTimer();
+            } else {
+                const delay = failures === 1 ? 60_000 : 5 * 60_000;
+                this.settings.autoSyncRetryAfter = Date.now() + delay;
+            }
+        }
         await this.saveSettings();
-        this.mobileWidget?.setError(msg);
+        this.refreshStatusSurfaces();
 
         if (msg.includes('Rate Limit') || msg.includes('abuse limit')) {
             const match = /reset in (\d+)s/.exec(msg);
@@ -177,7 +288,10 @@ export default class RayVaultSyncPlugin extends Plugin {
             this.rateLimitResetTime = Date.now() + waitMs;
             new Notice(`Ray Vault Sync: Rate limit hit. Cooling down for ${Math.ceil(waitMs/60000)}m.`);
         } else if (!isAuto) {
-            new Notice(`Ray Vault Sync failed: ${msg}`);
+            const pauseNotice = error instanceof SyncSafetyError
+                ? `\n${this.settings.autoSyncPausedReason}`
+                : '';
+            new Notice(`Ray Vault Sync failed: ${safeMsg}${pauseNotice}`);
         }
         this.statusBarItemEl.setText('Ray Sync: Error');
     }
@@ -202,20 +316,25 @@ export default class RayVaultSyncPlugin extends Plugin {
             });
 
             const now = Date.now();
+            const wasPaused = Boolean(this.settings.autoSyncPausedReason);
             this.settings.lastSyncTimestamp = now;
             this.settings.lastSyncStatus = 'success';
             this.settings.lastSyncMessage = undefined;
+            this.settings.autoSyncFailureCount = 0;
+            this.settings.autoSyncRetryAfter = undefined;
+            this.settings.autoSyncPausedReason = undefined;
             await this.saveSettings();
 
-            this.mobileWidget?.setSuccess(now);
+            if (!isAuto && wasPaused && this.settings.autoSyncEnabled) this.setupAutoSync(false);
+            this.refreshStatusSurfaces();
 
             const dateStr = new Date(now).toLocaleTimeString();
             if (!isAuto) new Notice(`Ray Vault Sync: Synced successfully at ${dateStr}`);
-            this.statusBarItemEl.setText(`Ray Sync: Synced at ${dateStr}`);
         } catch (error: unknown) {
             await this.handleSyncError(error, isAuto);
         } finally {
             this.isSyncing = false;
+            this.refreshStatusSurfaces();
         }
     }
 }

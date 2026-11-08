@@ -1,4 +1,4 @@
-import { formatRelativeTime, MobileSyncWidget } from '../src/mobile-widget';
+import { formatRelativeTime, getSyncFreshness, MobileSyncWidget } from '../src/mobile-widget';
 import { DEFAULT_SETTINGS } from '../src/settings';
 
 describe('MobileSyncWidget & Settings', () => {
@@ -161,6 +161,24 @@ describe('MobileSyncWidget & Settings', () => {
         test('returns days format for 24 hours or more', () => {
             expect(formatRelativeTime(baseNow - 24 * 3600000, baseNow)).toBe('1d ago');
             expect(formatRelativeTime(baseNow - 5 * 86400000, baseNow)).toBe('5d ago');
+        });
+    });
+
+    describe('getSyncFreshness', () => {
+        const now = 1_725_534_000_000;
+        const settings = {
+            autoSyncEnabled: true,
+            autoSyncInterval: 5,
+            lastSyncTimestamp: now,
+            lastSyncStatus: 'success' as const
+        };
+
+        test('distinguishes fresh, stale, syncing, error, and disabled states', () => {
+            expect(getSyncFreshness(settings, now)).toBe('fresh');
+            expect(getSyncFreshness({ ...settings, lastSyncTimestamp: now - 16 * 60_000 }, now)).toBe('stale');
+            expect(getSyncFreshness({ ...settings, lastSyncStatus: 'syncing' }, now)).toBe('syncing');
+            expect(getSyncFreshness({ ...settings, lastSyncStatus: 'error' }, now)).toBe('error');
+            expect(getSyncFreshness({ ...settings, autoSyncEnabled: false }, now)).toBe('off');
         });
     });
 });

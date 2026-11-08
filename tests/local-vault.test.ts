@@ -2,6 +2,16 @@ import { TFile } from 'obsidian';
 import { LocalVault } from '../src/local-vault';
 
 describe('LocalVault content hashes', () => {
+    test('validates target paths without creating or changing vault files', async () => {
+        const exists = jest.fn().mockResolvedValue(false);
+        const vault = new LocalVault({ vault: { adapter: { exists } } } as never);
+
+        await expect(vault.validatePath('notes/bad:name.md')).rejects.toThrow('bad:name.md');
+        await expect(vault.validatePath('notes/good-name.md')).resolves.toBeUndefined();
+        expect(exists).toHaveBeenCalledTimes(1);
+        expect(exists).toHaveBeenCalledWith('notes/good-name.md');
+    });
+
     test('uses SHA-256 of raw content bytes, without Git blob framing', async () => {
         const content = new TextEncoder().encode('hello world\n');
         const app = {
@@ -113,6 +123,27 @@ describe('LocalVault content hashes', () => {
         await expect(vault.getFiles()).resolves.toMatchObject([
             { path: 'notes.md', content: 'note', isBinary: false },
             { path: 'images/photo.png', binaryData: bytes, isBinary: true }
+        ]);
+    });
+
+    test('enumerates only the three allowlisted Thousand Sunny hidden state files', async () => {
+        const files = [
+            { path: 'Medium Posts/.automation/model-registry.json', extension: 'json' },
+            { path: 'Medium Posts/.automation/model-state.json', extension: 'json' },
+            { path: 'Medium Posts/.automation/visual-catalog.json', extension: 'json' },
+            { path: 'Medium Posts/.automation/private.json', extension: 'json' },
+            { path: '.obsidian/plugins/example/data.json', extension: 'json' }
+        ];
+        const bytes = new TextEncoder().encode('{}');
+        const vault = new LocalVault({ vault: {
+            getFiles: () => files,
+            readBinary: async () => bytes.buffer
+        } } as never);
+
+        await expect(vault.getFiles()).resolves.toMatchObject([
+            { path: 'Medium Posts/.automation/model-registry.json' },
+            { path: 'Medium Posts/.automation/model-state.json' },
+            { path: 'Medium Posts/.automation/visual-catalog.json' }
         ]);
     });
 

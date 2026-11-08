@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian';
+import { App, normalizePath, TFile } from 'obsidian';
 import { ILocalVault, LocalFile, SyncState } from './interfaces';
 import { isIgnoredPath } from './sync-core';
 
@@ -25,6 +25,32 @@ export class LocalVault implements ILocalVault {
 
     public getCustomExcludes(): string[] {
         return this.customExcludes;
+    }
+
+    public async validatePath(path: string): Promise<void> {
+        const normalized = normalizePath(path);
+        const segments = path.split('/');
+        const invalidName = /[<>:"|?*\\\u0000-\u001f]/;
+        const reservedName = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+        const invalid = !path || path !== normalized || path.startsWith('/') || segments.some(segment =>
+            !segment || segment === '.' || segment === '..' ||
+            invalidName.test(segment) || /[. ]$/.test(segment) || reservedName.test(segment)
+        );
+        if (invalid) {
+            throw new Error(`Invalid remote path "${path}". Rename the file or add it to Folders to skip, then retry.`);
+        }
+
+        try {
+            // A read-only adapter probe catches platform-specific path failures before sync writes begin.
+            await this.app.vault.adapter.exists(normalized);
+        } catch (error: unknown) {
+            const reason = error instanceof Error ? error.message : String(error);
+            throw new Error(`Cannot safely access remote path "${path}": ${reason}. Rename it or add it to Folders to skip.`);
+        }
+    }
+
+    public async pathExists(path: string): Promise<boolean> {
+        return this.app.vault.adapter.exists(path);
     }
 
     private toArrayBuffer(data: Uint8Array): ArrayBuffer {
