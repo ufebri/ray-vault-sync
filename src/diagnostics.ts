@@ -2,11 +2,13 @@ import { Notice, App } from 'obsidian';
 import { GitHubClient } from './github-client';
 import { LocalVault } from './local-vault';
 import { SyncEngine } from './sync-core';
-import { ErrorLogManager } from './error-log';
+import { ErrorLogManager, redactText } from './error-log';
+import { formatRelativeTime, getSyncFreshness } from './mobile-widget';
 import { RayVaultSyncSettings } from './settings';
 
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+function errorMessage(error: unknown, token: string): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return redactText(message, [token]);
 }
 
 async function appendLocalStatus(app: App, settings: RayVaultSyncSettings, report: string[]): Promise<boolean> {
@@ -25,7 +27,7 @@ async function appendLocalStatus(app: App, settings: RayVaultSyncSettings, repor
         ]);
         return true;
     } catch (error: unknown) {
-        lines = lines.concat(`- Local Vault Error: ${errorMessage(error)}`);
+        lines = lines.concat(`- Local Vault Error: ${errorMessage(error, settings.githubToken)}`);
         return false;
     } finally {
         report.push(...lines);
@@ -48,7 +50,7 @@ async function appendGitHubStatus(settings: RayVaultSyncSettings, report: string
         ]);
         return true;
     } catch (error: unknown) {
-        lines = lines.concat(`- GitHub Connection Error: ${errorMessage(error)}`);
+        lines = lines.concat(`- GitHub Connection Error: ${errorMessage(error, settings.githubToken)}`);
         return false;
     } finally {
         report.push(...lines);
@@ -85,7 +87,7 @@ async function appendPlanPreview(
             `- Potential Conflicts: ${counts.CONFLICT}`
         ]);
     } catch (error: unknown) {
-        lines = lines.concat(`- Reconciler Error: ${errorMessage(error)}`);
+        lines = lines.concat(`- Reconciler Error: ${errorMessage(error, settings.githubToken)}`);
     } finally {
         report.push(...lines);
     }
@@ -102,15 +104,28 @@ export async function runDiagnostics(
     push('# Ray Vault Sync - Diagnostics Report');
     push(`Generated at: ${new Date().toISOString()}`);
 
-    const maskedToken = settings.githubToken 
-        ? `${settings.githubToken.substring(0, 4)}...${settings.githubToken.substring(settings.githubToken.length - 4)}` 
-        : 'NOT SET';
+    const tokenStatus = settings.githubToken ? 'Configured (redacted)' : 'NOT SET';
     
     push(`\n## Configuration`);
     push(`- Repository: \`${settings.repository || 'NOT SET'}\``);
     push(`- Branch: \`${settings.branch || 'main'}\``);
-    push(`- Token: \`${maskedToken}\``);
+    push(`- Token: ${tokenStatus}`);
     push(`- Auto-Sync: ${settings.autoSyncEnabled ? 'Enabled (' + settings.autoSyncInterval + ' mins)' : 'Disabled'}`);
+    const freshnessLabels = {
+        off: 'Off',
+        syncing: 'Syncing',
+        fresh: 'Fresh',
+        stale: 'Stale',
+        error: 'Error'
+    };
+    push(`- Sync Freshness: ${freshnessLabels[getSyncFreshness(settings)]}`);
+    push(`- Last Successful Sync: ${formatRelativeTime(settings.lastSyncTimestamp)}`);
+    if (settings.lastSyncMessage) {
+        push(`- Latest Sync Error: ${redactText(settings.lastSyncMessage, [settings.githubToken])}`);
+    }
+    if (settings.autoSyncPausedReason) {
+        push(`- Auto-Sync Pause: ${redactText(settings.autoSyncPausedReason, [settings.githubToken])}`);
+    }
 
     const localOk = await appendLocalStatus(app, settings, report);
     const githubOk = await appendGitHubStatus(settings, report);
@@ -128,7 +143,7 @@ export async function runDiagnostics(
         const recent = await errorLog.formatRecent(10);
         push(`\n## Recent Errors (redacted, local only)`);
         push('```');
-        push(recent);
+        push(redactText(recent, [settings.githubToken]));
         push('```');
     } catch {
         /* best effort */
@@ -146,7 +161,7 @@ export async function runDiagnostics(
         }
         new Notice('Ray Vault Sync: Diagnostics complete! Report opened.');
     } catch (e: unknown) {
-        const msg = errorMessage(e);
+        const msg = errorMessage(e, settings.githubToken);
         new Notice(`Ray Vault Sync: Diagnostics failed to write report. ${msg}`);
     }
 }

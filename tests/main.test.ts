@@ -2,20 +2,25 @@ import { Notice } from 'obsidian';
 import RayVaultSyncPlugin from '../src/main';
 import { LocalVault } from '../src/local-vault';
 import { GitHubClient } from '../src/github-client';
-import { SyncEngine } from '../src/sync-core';
+import { SyncEngine, SyncSafetyError } from '../src/sync-core';
 import { MobileSyncWidget } from '../src/mobile-widget';
 
 jest.mock('../src/local-vault');
 jest.mock('../src/github-client');
-jest.mock('../src/sync-core');
+jest.mock('../src/sync-core', () => ({
+    ...jest.requireActual('../src/sync-core'),
+    SyncEngine: jest.fn()
+}));
 jest.mock('../src/diagnostics', () => ({ runDiagnostics: jest.fn() }));
 jest.mock('../src/mobile-widget', () => ({
+    ...jest.requireActual('../src/mobile-widget'),
     MobileSyncWidget: jest.fn().mockImplementation(() => ({
         mount: jest.fn(),
         destroy: jest.fn(),
         setError: jest.fn(),
         setSyncing: jest.fn(),
-        setSuccess: jest.fn()
+        setSuccess: jest.fn(),
+        updateState: jest.fn()
     }))
 }));
 
@@ -33,7 +38,9 @@ describe('RayVaultSyncPlugin sync lifecycle', () => {
         jest.clearAllMocks();
         Notice.messages.length = 0;
         mockEngine = { executeSync: jest.fn().mockResolvedValue(undefined) };
-        localVaultMock.mockImplementation((() => ({})) as never);
+        localVaultMock.mockImplementation((() => ({
+            getSyncState: jest.fn().mockResolvedValue(null)
+        })) as never);
         githubClientMock.mockImplementation((() => ({})) as never);
         syncEngineMock.mockImplementation((() => mockEngine) as never);
         plugin = new RayVaultSyncPlugin();
@@ -77,9 +84,109 @@ describe('RayVaultSyncPlugin sync lifecycle', () => {
         expect(plugin.settings.lastSyncTimestamp).toBe(now);
         expect(plugin.settings.lastSyncStatus).toBe('success');
         expect(plugin.settings.lastSyncMessage).toBeUndefined();
-        expect(statusBar.setText).toHaveBeenLastCalledWith(`Ray Sync: Synced at ${new Date(now).toLocaleTimeString()}`);
+        expect(statusBar.setText).toHaveBeenLastCalledWith('Ray Sync: Auto-sync off · Just now');
         expect(Notice.messages).toContain('Ray Vault Sync: Syncing with GitHub...');
         expect(Notice.messages.at(-1)).toContain('Ray Vault Sync: Synced successfully at ');
+    });
+
+    test('keeps the last successful timestamp and pauses auto-sync after an unsafe failure', async () => {
+        const lastSuccess = Date.now() - 120_000;
+        plugin.settings.autoSyncEnabled = true;
+        plugin.settings.autoSyncInterval = 2;
+        plugin.settings.lastSyncTimestamp = lastSuccess;
+        plugin.settings.lastSyncStatus = 'success';
+        const clearInterval = jest.fn();
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: { setInterval: jest.fn(() => 42), clearInterval, setTimeout: jest.fn() }
+        });
+        plugin.setupAutoSync();
+        mockEngine.executeSync.mockRejectedValueOnce(new SyncSafetyError('Invalid path: notes/bad:name.md'));
+
+        await plugin.runSync(true);
+
+        expect(plugin.settings.lastSyncTimestamp).toBe(lastSuccess);
+        expect(plugin.settings.lastSyncStatus).toBe('error');
+        expect(plugin.settings.autoSyncPausedReason).toContain('bad:name.md');
+        expect(plugin.settings.autoSyncPausedReason).toContain('Auto-Sync paused');
+        expect(plugin.settings.autoSyncInterval).toBe(2);
+        expect(clearInterval).toHaveBeenCalledWith(42);
+    });
+
+    test('bounds automatic transient failures and resumes after a successful manual sync', async () => {
+        plugin.settings.autoSyncEnabled = true;
+        plugin.settings.autoSyncInterval = 2;
+        const clearInterval = jest.fn();
+        const setInterval = jest.fn(() => 42);
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: { setInterval, clearInterval, setTimeout: jest.fn() }
+        });
+        plugin.setupAutoSync();
+        mockEngine.executeSync.mockRejectedValue(new Error('Network unavailable'));
+
+        await plugin.runSync(true);
+        expect(plugin.settings.autoSyncRetryAfter).toBeGreaterThan(Date.now());
+        await plugin.runSync(true);
+        expect(mockEngine.executeSync).toHaveBeenCalledTimes(1);
+        plugin.settings.autoSyncRetryAfter = 0;
+        await plugin.runSync(true);
+        plugin.settings.autoSyncRetryAfter = 0;
+        await plugin.runSync(true);
+
+        expect(plugin.settings.autoSyncFailureCount).toBe(3);
+        expect(plugin.settings.autoSyncPausedReason).toContain('consecutive automatic failures');
+        expect(clearInterval).toHaveBeenCalledWith(42);
+        await plugin.runSync(true);
+        expect(mockEngine.executeSync).toHaveBeenCalledTimes(3);
+
+        mockEngine.executeSync.mockResolvedValueOnce(undefined);
+        await plugin.runSync(false);
+
+        expect(plugin.settings.autoSyncPausedReason).toBeUndefined();
+        expect(plugin.settings.autoSyncFailureCount).toBe(0);
+        expect(setInterval).toHaveBeenCalledWith(expect.any(Function), 120_000);
+    });
+
+    test('shows freshness, saved commit, and a sanitized latest error in Show Sync Status', async () => {
+        const now = Date.now();
+        plugin.settings.autoSyncEnabled = true;
+        plugin.settings.autoSyncInterval = 10;
+        plugin.settings.lastSyncTimestamp = now - 60_000;
+        plugin.settings.lastSyncStatus = 'error';
+        plugin.settings.lastSyncMessage = 'request failed with token';
+        localVaultMock.mockImplementation((() => ({
+            getSyncState: jest.fn().mockResolvedValue({ lastSyncedCommit: 'saved-commit-sha' })
+        })) as never);
+        const commands: Array<{ id: string; callback: () => void }> = [];
+        Object.assign(plugin, {
+            app: { workspace: { onLayoutReady: jest.fn(), on: jest.fn() } },
+            loadData: jest.fn().mockResolvedValue({
+                githubToken: 'token',
+                repository: 'owner/repo',
+                branch: 'main',
+                autoSyncEnabled: true,
+                autoSyncInterval: 10,
+                lastSyncTimestamp: now - 60_000,
+                lastSyncStatus: 'error',
+                lastSyncMessage: 'request failed with token'
+            }),
+            addCommand: (command: { id: string; callback: () => void }) => commands.push(command)
+        });
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: { setInterval: jest.fn(() => 42), clearInterval: jest.fn(), setTimeout: jest.fn() }
+        });
+
+        await plugin.onload();
+        commands.find(command => command.id === 'show-status')?.callback();
+        await new Promise(resolve => setImmediate(resolve));
+
+        expect(Notice.messages.at(-1)).toContain('Auto-sync: Enabled (every 10 minutes)');
+        expect(Notice.messages.at(-1)).toContain('State: Error');
+        expect(Notice.messages.at(-1)).toContain('saved-commit-sha');
+        expect(Notice.messages.at(-1)).toContain('[REDACTED]');
+        expect(Notice.messages.at(-1)).not.toContain('request failed with token');
     });
 
     test('logs failures and enforces a rate-limit cooldown for manual runs', async () => {
@@ -149,7 +256,8 @@ describe('RayVaultSyncPlugin sync lifecycle', () => {
             destroy: widgetDestroy,
             setError: jest.fn(),
             setSyncing: jest.fn(),
-            setSuccess: jest.fn()
+            setSuccess: jest.fn(),
+            updateState: jest.fn()
         })) as never);
         Object.defineProperty(globalThis, 'window', {
             configurable: true,
@@ -181,7 +289,9 @@ describe('RayVaultSyncPlugin sync lifecycle', () => {
 
         await plugin.onload();
 
-        expect(commands.map(command => command.id)).toEqual(['sync-now', 'show-status', 'run-diagnostics']);
+        expect(commands.map(command => command.id)).toEqual([
+            'sync-now', 'show-status', 'resume-auto-sync', 'run-diagnostics'
+        ]);
         expect(settingTab).toHaveBeenCalledTimes(1);
         expect(widgetMount).toHaveBeenCalledTimes(1);
         layoutChange();
@@ -191,8 +301,9 @@ describe('RayVaultSyncPlugin sync lifecycle', () => {
         ribbon();
         expect(plugin.runSync).toHaveBeenCalledTimes(2);
         commands[1].callback();
+        await new Promise(resolve => setImmediate(resolve));
         expect(Notice.messages.at(-1)).toContain('Target: ufebri/raylabs-vault');
-        commands[2].callback();
+        commands[3].callback();
 
         plugin.settings.enableMobileSidebarWidget = false;
         plugin.refreshMobileWidget();

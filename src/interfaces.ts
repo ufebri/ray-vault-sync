@@ -21,6 +21,8 @@ export interface SyncState {
 export interface ILocalVault {
     getFiles(): Promise<LocalFile[]>;
     readFile(path: string): Promise<LocalFile>;
+    validatePath(path: string): Promise<void>;
+    pathExists(path: string): Promise<boolean>;
     writeFile(path: string, content: string | Uint8Array, isBinary: boolean): Promise<void>;
     deleteFile(path: string): Promise<void>;
     renameFile(oldPath: string, newPath: string): Promise<void>;

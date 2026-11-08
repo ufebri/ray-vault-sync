@@ -20,12 +20,19 @@ class MockVault implements ILocalVault {
         remoteBaseFiles: {}
     };
     public operations: string[] = [];
+    public invalidPaths = new Set<string>();
+    public failWritePath: string | null = null;
     public activeMutations = 0;
     public maxActiveMutations = 0;
 
     async getFiles() { return Object.values(this.files); }
     async readFile(path: string) { return this.files[path]; }
+    async pathExists(path: string) { return path in this.files; }
+    async validatePath(path: string) {
+        if (this.invalidPaths.has(path)) throw new Error(`invalid path: ${path}`);
+    }
     async writeFile(path: string, content: string | Uint8Array, isBinary: boolean) {
+        if (path === this.failWritePath) throw new Error('write failed');
         this.beginMutation(`write:${path}`);
         const hash = await sha256(content);
         this.files[path] = {
@@ -67,15 +74,20 @@ class MockVault implements ILocalVault {
 class MockGitHub implements IGitHubClient {
     public headCommit = 'abc';
     public tree: RemoteFile[] = [];
+    public commitTrees = new Map<string, RemoteFile[]>();
     public blobs: Record<string, Uint8Array> = {};
     public changes: GitTreeItem[] = [];
     public blobReads: string[] = [];
     public treeReads: string[] = [];
+    public unavailableTrees = new Set<string>();
+    public commitFailure: Error | null = null;
+    private treeCounter = 0;
 
     async getHeadCommit(_branch: string) { return this.headCommit; }
     async getTree(sha: string) {
         this.treeReads.push(sha);
-        return this.tree;
+        if (this.unavailableTrees.has(sha)) throw new Error('missing mock commit');
+        return this.commitTrees.get(sha) ?? this.tree;
     }
     async getBlob(sha: string, isBinary: boolean) {
         const bytes = await this.getBlobBytes(sha);
@@ -87,24 +99,30 @@ class MockGitHub implements IGitHubClient {
         if (!bytes) throw new Error('missing mock blob');
         return bytes;
     }
-    async createTree(_base: string, changes: GitTreeItem[]) {
+    async createTree(base: string, changes: GitTreeItem[]) {
         this.changes.push(...changes);
-        this.tree = this.tree.filter(file => !changes.some(change =>
+        let nextTree = [...(this.commitTrees.get(base) ?? this.tree)].filter(file => !changes.some(change =>
             change.path === file.path && change.sha === null
         ));
         for (const change of changes) {
             if (change.sha === null) continue;
             const sha = change.sha ?? `created-${change.path}`;
-            this.tree = this.tree.filter(file => file.path !== change.path);
-            this.tree.push({ path: change.path, sha });
+            nextTree = nextTree.filter(file => file.path !== change.path);
+            nextTree.push({ path: change.path, sha });
         }
-        return 'new-tree-sha';
+        const treeSha = `tree-${this.treeCounter++}`;
+        this.commitTrees.set(treeSha, nextTree);
+        return treeSha;
     }
-    async createCommit(_message: string, _tree: string, _parents: string[]) {
-        this.headCommit = 'def';
-        return this.headCommit;
+    async createCommit(_message: string, tree: string, _parents: string[]) {
+        if (this.commitFailure) throw this.commitFailure;
+        this.commitTrees.set('def', this.commitTrees.get(tree) ?? this.tree);
+        return 'def';
     }
-    async updateRef(_branch: string, commit: string) { this.headCommit = commit; }
+    async updateRef(_branch: string, commit: string) {
+        this.headCommit = commit;
+        this.tree = this.commitTrees.get(commit) ?? this.tree;
+    }
     async createBlob(content: string | Uint8Array) {
         const sha = `created-${Object.keys(this.blobs).length}`;
         this.blobs[sha] = typeof content === 'string' ? new TextEncoder().encode(content) : content;
@@ -358,6 +376,175 @@ describe('SyncEngine (3-Way Merge Core)', () => {
         await expect(engine.executeSync()).rejects.toThrow('Remote race detected');
     });
 
+    test('preflights every mutating path before writing any plan item', async () => {
+        const savedState = state({ 'first.md': localBase }, { 'first.md': remoteBase });
+        vault.syncState = savedState;
+        vault.files = { 'first.md': file('first.md', localBase) };
+        github.tree = [
+            remoteFile('first.md', remoteEdit),
+            remoteFile('late:invalid.md', remoteEdit)
+        ];
+        vault.invalidPaths.add('late:invalid.md');
+
+        await expect(engine.executeSync()).rejects.toThrow('late:invalid.md');
+
+        expect(vault.operations).toEqual([]);
+        expect(vault.syncState).toBe(savedState);
+        expect(github.headCommit).toBe('abc');
+        expect(github.changes).toEqual([]);
+    });
+
+    test('marks a failed local write as unsafe to retry automatically', async () => {
+        const savedState = state({}, {});
+        vault.syncState = savedState;
+        vault.failWritePath = 'remote.md';
+        github.tree = [remoteFile('remote.md', remoteEdit)];
+        github.blobs[remoteEdit] = new TextEncoder().encode('remote content');
+
+        await expect(engine.executeSync()).rejects.toThrow('changes began');
+
+        expect(vault.syncState).toBe(savedState);
+        expect(github.headCommit).toBe('abc');
+        expect(github.changes).toEqual([]);
+    });
+
+    test('reuses one deterministic conflict snapshot after a remote commit failure', async () => {
+        vault.files = { 'file.md': file('file.md', localEdit, 'local edit') };
+        github.tree = [remoteFile('file.md', remoteEdit)];
+        github.blobs[remoteEdit] = new TextEncoder().encode('remote edit');
+        const savedState = state({ 'file.md': localBase }, { 'file.md': remoteBase });
+        vault.syncState = savedState;
+        github.commitFailure = new Error('commit unavailable');
+
+        await expect(engine.executeSync()).rejects.toThrow('changes began');
+
+        const snapshotPath = Object.keys(vault.files).find(path => path.includes('.conflict-'));
+        expect(snapshotPath).toMatch(new RegExp(`\\.conflict-${remoteEdit}\\.md$`));
+        expect(Object.keys(vault.files).filter(path => path.includes('.conflict-'))).toHaveLength(1);
+        expect(vault.syncState).toBe(savedState);
+        expect(github.headCommit).toBe('abc');
+
+        github.commitFailure = null;
+        await engine.executeSync();
+
+        expect(Object.keys(vault.files).filter(path => path.includes('.conflict-'))).toEqual([snapshotPath]);
+        expect(github.tree.filter(file => file.path === snapshotPath)).toHaveLength(1);
+        expect(vault.files[snapshotPath!].content).toBe('remote edit');
+    });
+
+    test('rejects an edited conflict snapshot without overwriting it', async () => {
+        const snapshotPath = `file.conflict-${remoteEdit}.md`;
+        vault.files = {
+            'file.md': file('file.md', localEdit, 'local edit'),
+            [snapshotPath]: file(snapshotPath, await sha256('user-edited snapshot'), 'user-edited snapshot')
+        };
+        github.tree = [remoteFile('file.md', remoteEdit)];
+        github.blobs[remoteEdit] = new TextEncoder().encode('remote edit');
+        const savedState = state({ 'file.md': localBase }, { 'file.md': remoteBase });
+        vault.syncState = savedState;
+
+        await expect(engine.executeSync()).rejects.toThrow('snapshot collision');
+
+        expect(vault.operations).toEqual([]);
+        expect(vault.files[snapshotPath].content).toBe('user-edited snapshot');
+        expect(vault.syncState).toBe(savedState);
+        expect(github.headCommit).toBe('abc');
+        expect(github.changes).toEqual([]);
+    });
+
+    test('migrates an allowlisted hidden baseline from the saved commit tree', async () => {
+        const path = 'Medium Posts/.automation/model-state.json';
+        const baselineBytes = new TextEncoder().encode('saved baseline');
+        const updatedBytes = new TextEncoder().encode('Worker update');
+        vault.files = { [path]: file(path, await sha256(baselineBytes), 'saved baseline') };
+        vault.syncState = state({}, {});
+        github.headCommit = 'current';
+        github.tree = [remoteFile(path, remoteEdit)];
+        github.commitTrees.set('abc', [remoteFile(path, remoteBase)]);
+        github.blobs[remoteBase] = baselineBytes;
+        github.blobs[remoteEdit] = updatedBytes;
+
+        const { plan, baseState } = await engine.calculatePlan();
+
+        expect(plan.find(item => item.path === path)?.action).toBe('DOWNLOAD');
+        expect(baseState.baseFiles[path]).toBe(await sha256(baselineBytes));
+        expect(baseState.remoteBaseFiles?.[path]).toBe(remoteBase);
+        expect(github.treeReads).toContain('abc');
+    });
+
+    test('uploads local-only changes to allowlisted hidden state after baseline migration', async () => {
+        const path = 'Medium Posts/.automation/model-registry.json';
+        const baselineBytes = new TextEncoder().encode('saved baseline');
+        const localContent = 'local preparation';
+        vault.files = { [path]: file(path, await sha256(localContent), localContent) };
+        vault.syncState = state({}, {});
+        github.headCommit = 'current';
+        github.tree = [remoteFile(path, remoteBase)];
+        github.commitTrees.set('abc', [remoteFile(path, remoteBase)]);
+        github.blobs[remoteBase] = baselineBytes;
+
+        await engine.executeSync();
+
+        expect(github.changes).toContainEqual(expect.objectContaining({ path, content: localContent }));
+    });
+
+    test('converges equal concurrent edits to allowlisted hidden state', async () => {
+        const path = 'Medium Posts/.automation/visual-catalog.json';
+        const baselineBytes = new TextEncoder().encode('saved baseline');
+        const currentBytes = new TextEncoder().encode('same current content');
+        vault.files = { [path]: file(path, await sha256(currentBytes), 'same current content') };
+        vault.syncState = state({}, {});
+        github.headCommit = 'current';
+        github.tree = [remoteFile(path, remoteEdit)];
+        github.commitTrees.set('abc', [remoteFile(path, remoteBase)]);
+        github.blobs[remoteBase] = baselineBytes;
+        github.blobs[remoteEdit] = currentBytes;
+
+        const { plan } = await engine.calculatePlan();
+
+        expect(plan.find(item => item.path === path)?.action).toBe('NOOP');
+    });
+
+    test('preserves divergent allowlisted hidden state on both sides', async () => {
+        const path = 'Medium Posts/.automation/model-state.json';
+        const baselineBytes = new TextEncoder().encode('saved baseline');
+        const remoteBytes = new TextEncoder().encode('remote Worker update');
+        vault.files = { [path]: file(path, await sha256('local edit'), 'local edit') };
+        vault.syncState = state({}, {});
+        github.headCommit = 'current';
+        github.tree = [remoteFile(path, remoteEdit)];
+        github.commitTrees.set('abc', [remoteFile(path, remoteBase)]);
+        github.blobs[remoteBase] = baselineBytes;
+        github.blobs[remoteEdit] = remoteBytes;
+
+        await engine.executeSync();
+
+        const snapshot = Object.keys(vault.files).find(filePath => filePath.includes(`.conflict-${remoteEdit}`));
+        expect(vault.files[path].content).toBe('local edit');
+        expect(snapshot).toBeDefined();
+        expect(vault.files[snapshot!].content).toBe('remote Worker update');
+        expect(github.tree.map(file => file.path)).toContain(snapshot);
+    });
+
+    test('fails closed when the saved hidden-file commit or blob is unavailable', async () => {
+        const path = 'Medium Posts/.automation/model-state.json';
+        vault.files = { [path]: file(path, localEdit, 'local edit') };
+        vault.syncState = state({}, {});
+        github.headCommit = 'current';
+        github.tree = [remoteFile(path, remoteEdit)];
+        github.unavailableTrees.add('abc');
+
+        await expect(engine.executeSync()).rejects.toThrow('saved Git commit');
+        expect(vault.operations).toEqual([]);
+        expect(github.headCommit).toBe('current');
+
+        github.unavailableTrees.clear();
+        github.commitTrees.set('abc', [remoteFile(path, remoteBase)]);
+        await expect(engine.executeSync()).rejects.toThrow('baseline blob');
+        expect(vault.operations).toEqual([]);
+        expect(github.headCommit).toBe('current');
+    });
+
     test('isIgnoredPath blocks internal, hidden, and excluded files', () => {
         const { isIgnoredPath } = require('../src/sync-core');
 
@@ -367,6 +554,9 @@ describe('SyncEngine (3-Way Merge Core)', () => {
         expect(isIgnoredPath('.obsidian/workspace.json')).toBe(true);
         expect(isIgnoredPath('.DS_Store')).toBe(true);
         expect(isIgnoredPath('plugins/sync-state.json')).toBe(true);
+        expect(isIgnoredPath('Medium Posts/.automation/model-registry.json')).toBe(false);
+        expect(isIgnoredPath(`Medium Posts/.automation/model-state.conflict-${remoteBase}.json`)).toBe(false);
+        expect(isIgnoredPath('Medium Posts/.automation/private.json')).toBe(true);
         expect(isIgnoredPath('Notes/Meeting.md')).toBe(false);
         expect(isIgnoredPath('templates/daily.md', ['templates'])).toBe(true);
     });

@@ -98,3 +98,11 @@ export const Platform = {
     isMobile: false,
     isDesktop: true
 };
+
+export function normalizePath(path: string): string {
+    return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+}
+
+export function normalizePath(path: string): string {
+    return path.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^\/|\/$/g, '');
+}

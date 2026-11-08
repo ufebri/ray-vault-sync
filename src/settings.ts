@@ -12,6 +12,9 @@ export interface RayVaultSyncSettings {
     lastSyncTimestamp: number | null;
     lastSyncStatus: 'idle' | 'syncing' | 'success' | 'error';
     lastSyncMessage?: string;
+    autoSyncPausedReason?: string;
+    autoSyncFailureCount?: number;
+    autoSyncRetryAfter?: number;
 }
 
 export const DEFAULT_SETTINGS: RayVaultSyncSettings = {
